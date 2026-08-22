@@ -3,7 +3,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
 import Svg, { Ellipse, Line } from 'react-native-svg';
 
-import { defaultLayers, type AppTheme, type BackgroundLayer, type GradientStop } from '@/theme/themes';
+import { defaultLayers, type AppTheme, type BackgroundLayer } from '@/theme/themes';
 
 /**
  * Full-bleed layered theme background. Free themes are a soft wash (a → b);
