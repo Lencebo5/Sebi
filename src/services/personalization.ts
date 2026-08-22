@@ -162,9 +162,10 @@ export interface OrderOptions {
   /** Extra ids to treat as already shown (e.g. within one notification batch). */
   exclude?: string[];
   /**
-   * How many leading items to order via full personalized selection; the
-   * rest of the pool follows sorted by base score. Sessions rarely consume
-   * more than this, and it keeps ordering cheap.
+   * How many items to order via personalized selection. Defaults to the
+   * WHOLE pool — personalization never switches off partway through a
+   * feed, no matter how long the user keeps browsing. Set to 1 for a
+   * single draw (pickOne).
    */
   personalizedCount?: number;
   /** Injectable for deterministic tests. */
@@ -175,12 +176,14 @@ export interface OrderOptions {
 const POOL_SIZE = 30;
 /** How many best-by-base candidates get sequence-adjusted per pick. */
 const CANDIDATE_WINDOW = 120;
-const DEFAULT_PERSONALIZED_COUNT = 80;
 
 /**
  * Order a pool of eligible messages into a feed: repeated weighted-random
  * draws from the top of the score distribution, honoring the diversity
- * rules pick by pick.
+ * rules pick by pick — for EVERY position, first to last. Ordering the
+ * full 1,460-message corpus costs a few milliseconds once per feed build
+ * (base scores are computed once; each pick only re-adjusts a bounded
+ * candidate window), so there is no "generic tail".
  */
 export function orderFeed(
   items: Affirmation[],
@@ -189,9 +192,9 @@ export function orderFeed(
 ): Affirmation[] {
   const rng = options.rng ?? Math.random;
   const ctx: ScoringContext = { profile, period: options.period };
-  const count = Math.min(items.length, options.personalizedCount ?? DEFAULT_PERSONALIZED_COUNT);
+  const count = Math.min(items.length, options.personalizedCount ?? items.length);
 
-  const scored = items
+  let scored = items
     .map((item) => ({ item, base: baseScore(item, ctx) }))
     // Shuffle before the stable sort so equal scores tie-break randomly.
     .map((entry) => ({ ...entry, tiebreak: rng() }))
@@ -205,6 +208,11 @@ export function orderFeed(
   const result: Affirmation[] = [];
 
   for (let i = 0; i < count; i++) {
+    // Compact away already-picked entries now and then so scanning stays
+    // cheap even when ordering the whole corpus.
+    if (picked.size > 0 && i % 100 === 0) {
+      scored = scored.filter((entry) => !picked.has(entry.item.id));
+    }
     const candidates: { item: Affirmation; score: number }[] = [];
     for (const entry of scored) {
       if (picked.has(entry.item.id)) continue;
@@ -226,8 +234,8 @@ export function orderFeed(
     state.lastPicks = [chosen, ...state.lastPicks].slice(0, 3);
   }
 
-  // Deep tail: everything not personally ordered, best base scores first,
-  // recently seen items last.
+  // Remainder — only reached when personalizedCount < pool size (single
+  // draws): best base scores first, recently seen items last.
   const freshTail: Affirmation[] = [];
   const staleTail: Affirmation[] = [];
   for (const entry of scored) {

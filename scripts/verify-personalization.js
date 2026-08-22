@@ -43,9 +43,12 @@ const check = (label, ok, detail) => {
 
 for (const [name, { profile, expect }] of Object.entries(PROFILES)) {
   const rng = mulberry32(42);
+  const t0 = Date.now();
   const feed = orderFeed(ITEMS, profile, { period: 'day', recentIds: [], rng });
+  const orderMs = Date.now() - t0;
   const top = feed.slice(0, 30);
-  const first100 = feed.slice(0, 100);
+  // 150 sequential selections — personalization must hold well past #80.
+  const seq = feed.slice(0, 150);
 
   const goalShare = top.filter((a) => profile.goals.includes(a.category)).length / top.length;
   const challengeShare =
@@ -64,19 +67,37 @@ for (const [name, { profile, expect }] of Object.entries(PROFILES)) {
   if (expect.activatingShareMax !== undefined) check(`activating ≤ ${expect.activatingShareMax}`, activatingShare <= expect.activatingShareMax, activatingShare.toFixed(2));
   if (expect.softShareMin) check(`soft categories ≥ ${expect.softShareMin}`, softShare >= expect.softShareMin, softShare.toFixed(2));
 
-  // Diversity rules over the first 100 personalized... (first 80 personalized + tail start)
+  // Continuity: quality in selections 81-150 must not materially collapse
+  // versus 1-80 (some decline is inherent: a non-repeating feed consumes
+  // the best-matching messages first).
+  const targeted = (a) =>
+    profile.goals.includes(a.category) ||
+    a.personalization.needTags.some((t) => profile.currentChallenges.includes(t));
+  const share = (arr, fn) => arr.filter(fn).length / arr.length;
+  const early = seq.slice(0, 80);
+  const late = seq.slice(80, 150);
+  const earlyTargeted = share(early, targeted);
+  const lateTargeted = share(late, targeted);
+  console.log(`  ordering=${orderMs}ms targeted 1-80=${earlyTargeted.toFixed(2)} vs 81-150=${lateTargeted.toFixed(2)}`);
+  check('personalization holds after #80 (>=50% of early, >=0.35 abs)',
+    lateTargeted >= Math.max(0.35, earlyTargeted * 0.5),
+    `early ${earlyTargeted.toFixed(2)} late ${lateTargeted.toFixed(2)}`);
+  if (expect.activatingShareMax !== undefined) {
+    const lateActivating = share(late, (a) => a.personalization.emotionalIntensity === 'activating');
+    check('tone guardrail holds after #80 (activating <= 0.3)', lateActivating <= 0.3, lateActivating.toFixed(2));
+  }
+
+  // Diversity rules across all 150 sequential selections (incl. the 80 boundary).
   const ids = new Set();
   let dupes = 0;
-  for (let i = 0; i < first100.length; i++) {
-    const a = first100[i];
+  for (const a of seq) {
     if (ids.has(a.id)) dupes++;
     ids.add(a.id);
   }
-  check('no duplicate ids in first 100', dupes === 0, `${dupes}`);
-  check('no same subcategory back-to-back (first 80)', first100.slice(0, 80).every((a, i, arr) => i === 0 || arr[i - 1].subcategory !== a.subcategory));
-  check('no category run of 4+ (first 80)', (() => {
-    const w = first100.slice(0, 80);
-    for (let i = 3; i < w.length; i++) if ([0, 1, 2, 3].every((k) => w[i - k].category === w[i].category)) return false;
+  check('no duplicate ids in 150 selections', dupes === 0, `${dupes}`);
+  check('no same subcategory back-to-back (150)', seq.every((a, i, arr) => i === 0 || arr[i - 1].subcategory !== a.subcategory));
+  check('no category run of 4+ (150)', (() => {
+    for (let i = 3; i < seq.length; i++) if ([0, 1, 2, 3].every((k) => seq[i - k].category === seq[i].category)) return false;
     return true;
   })());
   // length + style mixing present
@@ -86,10 +107,9 @@ for (const [name, { profile, expect }] of Object.entries(PROFILES)) {
   check('styleType mix in top 30', stylesSeen.size >= 2, [...stylesSeen].join(','));
   // no back-to-back hard_days (D has difficult_period so rule is relaxed there)
   if (name !== 'D') {
-    const w = first100.slice(0, 80);
     let stacked = 0;
-    for (let i = 1; i < w.length; i++) if (w[i].category === 'hard_days' && w[i - 1].category === 'hard_days') stacked++;
-    check('no stacked hard_days', stacked === 0, `${stacked}`);
+    for (let i = 1; i < seq.length; i++) if (seq[i].category === 'hard_days' && seq[i - 1].category === 'hard_days') stacked++;
+    check('no stacked hard_days (150)', stacked === 0, `${stacked}`);
   }
 }
 

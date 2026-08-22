@@ -32,7 +32,7 @@ import type {
 } from '@/models/types';
 import { track } from '@/services/analytics';
 import { buildTodayFeed } from '@/services/dailyContent';
-import { DEFAULT_PROFILE, usePreferences } from '@/state/PreferencesContext';
+import { usePreferences } from '@/state/PreferencesContext';
 import { fonts, spacing, type } from '@/theme/tokens';
 
 const STEPS = 7;
@@ -102,11 +102,6 @@ export default function Onboarding() {
     router.replace('/(tabs)');
   };
 
-  const skipAll = () => {
-    updatePreferences({ onboardingCompleted: true, profile: DEFAULT_PROFILE });
-    router.replace('/(tabs)');
-  };
-
   const canContinue =
     step === 1 ? goals.length >= 1 : step === 2 ? challenges.length >= 1 : true;
 
@@ -131,7 +126,8 @@ export default function Onboarding() {
           styles.container,
           { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.mlg },
         ]}>
-        {/* Header: back · progress dots · skip */}
+        {/* Header: back · progress dots. No global skip — the core questions
+            are the point of onboarding; only individual steps are optional. */}
         <View style={styles.header}>
           <Pressable
             accessibilityRole="button"
@@ -155,9 +151,8 @@ export default function Onboarding() {
               />
             ))}
           </View>
-          <Pressable accessibilityRole="button" onPress={skipAll} hitSlop={8} style={styles.skipButton}>
-            <Text style={[styles.skipLabel, { color: tokens.faint }]}>Preskoči</Text>
-          </Pressable>
+          {/* Spacer mirrors the back button so the dots stay centered. */}
+          <View style={styles.headerButton} />
         </View>
 
         <Animated.View
@@ -177,6 +172,16 @@ export default function Onboarding() {
                   onPress={() => setAgeRange((prev) => (prev === option.id ? undefined : option.id))}
                 />
               ))}
+              {/* Age is optional — this option skips just this step. */}
+              <SelectableRow
+                label="Preskoči"
+                selected={false}
+                onPress={() => {
+                  setAgeRange(undefined);
+                  track('onboarding_age_selected', { ageRange: 'skipped' });
+                  setStep(1);
+                }}
+              />
             </StepList>
           )}
 
@@ -343,15 +348,6 @@ const styles = StyleSheet.create({
   dot: {
     height: 6,
     borderRadius: 999,
-  },
-  skipButton: {
-    height: 44,
-    justifyContent: 'center',
-    paddingHorizontal: spacing.smd,
-  },
-  skipLabel: {
-    fontFamily: fonts.sans,
-    fontSize: 12.5,
   },
   stepBody: {
     flex: 1,
