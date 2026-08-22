@@ -27,6 +27,13 @@ export function configureNotificationHandling() {
   });
 }
 
+/** Whether the user has hard-denied notifications in system settings. */
+export async function isNotificationPermissionDenied(): Promise<boolean> {
+  if (Platform.OS === 'web') return false;
+  const current = await Notifications.getPermissionsAsync();
+  return !current.granted && !current.canAskAgain;
+}
+
 export async function requestNotificationPermission(): Promise<boolean> {
   if (Platform.OS === 'web') return false;
   const current = await Notifications.getPermissionsAsync();

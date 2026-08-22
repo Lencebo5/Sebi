@@ -1,23 +1,23 @@
 {
   "expo": {
-    "name": "Danas",
-    "slug": "danas",
+    "name": "Sebi",
+    "slug": "sebi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "danas",
+    "scheme": "sebi",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "bundleIdentifier": "com.danas.app",
+      "bundleIdentifier": "com.sebi.app",
       "supportsTablet": false,
       "infoPlist": {
         "CFBundleAllowMixedLocalizations": true
       }
     },
     "android": {
-      "package": "com.danas.app",
+      "package": "com.sebi.app",
       "adaptiveIcon": {
-        "backgroundColor": "#191A23",
+        "backgroundColor": "#F6F1E7",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
@@ -32,7 +32,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#191A23",
+          "backgroundColor": "#F6F1E7",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }

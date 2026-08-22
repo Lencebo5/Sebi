@@ -1,9 +1,10 @@
 import type { Category, CategoryId } from '@/models/types';
 
 /**
- * Category catalogue. `premium` is data-driven — flip a flag to change
- * which categories are free. "today" is a virtual category: its feed is
- * built from the user's goals in dailyContent.ts.
+ * Category catalogue, ordered as in the design's Kategorije screen.
+ * `premium` is data-driven — flip a flag to change which categories are
+ * free. "today" is a virtual category: its feed is built from the user's
+ * goals in dailyContent.ts.
  */
 export const CATEGORIES: Category[] = [
   {
@@ -28,31 +29,25 @@ export const CATEGORIES: Category[] = [
     goal: true,
   },
   {
-    id: 'morning',
-    name: 'Dobro jutro',
-    description: 'Miran i jasan početak dana',
-    premium: false,
-    goal: false,
-  },
-  {
     id: 'self_love',
     name: 'Ljubav prema sebi',
     description: 'Budi blag prema sebi',
-    premium: true,
+    premium: false,
     goal: true,
   },
   {
     id: 'calm',
     name: 'Mir i stres',
+    goalName: 'Mir i manje stresa',
     description: 'Kada je svega previše',
-    premium: true,
+    premium: false,
     goal: true,
   },
   {
     id: 'gratitude',
     name: 'Zahvalnost',
     description: 'Primeti ono što već imaš',
-    premium: true,
+    premium: false,
     goal: false,
   },
   {
@@ -80,7 +75,7 @@ export const CATEGORIES: Category[] = [
     id: 'habits',
     name: 'Zdravije navike',
     description: 'Mali koraci koji ostaju',
-    premium: true,
+    premium: false,
     goal: true,
   },
   {
@@ -97,14 +92,33 @@ export const CATEGORIES: Category[] = [
     premium: true,
     goal: false,
   },
+  {
+    id: 'morning',
+    name: 'Dobro jutro',
+    description: 'Miran i jasan početak dana',
+    premium: false,
+    goal: false,
+  },
 ];
 
 export function getCategory(id: CategoryId): Category {
   return CATEGORIES.find((c) => c.id === id) ?? CATEGORIES[0];
 }
 
-/** Categories offered as goals during onboarding. */
-export const GOAL_CATEGORIES = CATEGORIES.filter((c) => c.goal);
+/** Order of the 2×4 goal grid in onboarding and "Moji ciljevi". */
+const GOAL_ORDER: CategoryId[] = [
+  'confidence',
+  'motivation',
+  'calm',
+  'self_love',
+  'work',
+  'money',
+  'relationships',
+  'habits',
+];
+
+/** Categories offered as goals, in design order. */
+export const GOAL_CATEGORIES = GOAL_ORDER.map((id) => getCategory(id)).filter((c) => c.goal);
 
 /** Onboarding "How do you want to feel?" options. */
 export const FEELING_OPTIONS = [

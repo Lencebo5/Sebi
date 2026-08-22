@@ -26,6 +26,8 @@ export interface Category {
   id: CategoryId;
   /** User-facing name (Serbian Latin). */
   name: string;
+  /** Label in the goal grid when it differs from the category name. */
+  goalName?: string;
   /** Short user-facing description. */
   description: string;
   premium: boolean;

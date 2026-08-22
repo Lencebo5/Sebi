@@ -1,27 +1,32 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, ViewStyle } from 'react-native';
 
+import { usePreferences } from '@/state/PreferencesContext';
 import { fonts, radius, spacing } from '@/theme/tokens';
 
+/**
+ * Solid CTA per the design: ink background, theme-surface text, 54px tall,
+ * 16px radius, slight press scale. The ghost variant is a quiet outline.
+ */
 export function PrimaryButton({
   label,
   onPress,
   variant = 'solid',
-  dark,
   loading = false,
+  loadingLabel,
   style,
 }: {
   label: string;
   onPress: () => void;
   variant?: 'solid' | 'ghost';
-  /** Whether the button sits on a dark background. */
-  dark: boolean;
   loading?: boolean;
+  /** Optional label shown next to the spinner (e.g. "Obrada…"). */
+  loadingLabel?: string;
   style?: ViewStyle;
 }) {
-  const solidBg = dark ? '#F2F1EC' : '#23241F';
-  const solidText = dark ? '#1B1C24' : '#F7F4EE';
-  const ghostText = dark ? '#F2F1EC' : '#23241F';
+  const { tokens } = usePreferences();
+  const solid = variant === 'solid';
+  const textColor = solid ? tokens.ctaFg : tokens.ink;
 
   return (
     <Pressable
@@ -29,15 +34,16 @@ export function PrimaryButton({
       onPress={loading ? undefined : onPress}
       style={({ pressed }) => [
         styles.base,
-        variant === 'solid' ? { backgroundColor: solidBg } : styles.ghost,
-        pressed && { opacity: 0.85, transform: [{ scale: 0.985 }] },
+        solid
+          ? { backgroundColor: tokens.ctaBg }
+          : { borderWidth: 1, borderColor: tokens.outline },
+        pressed && { transform: [{ scale: 0.985 }] },
         style,
       ]}>
-      {loading ? (
-        <ActivityIndicator color={variant === 'solid' ? solidText : ghostText} />
-      ) : (
-        <Text style={[styles.label, { color: variant === 'solid' ? solidText : ghostText }]}>
-          {label}
+      {loading && <ActivityIndicator size="small" color={textColor} />}
+      {(!loading || loadingLabel) && (
+        <Text style={[styles.label, { color: textColor }]}>
+          {loading ? loadingLabel : label}
         </Text>
       )}
     </Pressable>
@@ -47,16 +53,16 @@ export function PrimaryButton({
 const styles = StyleSheet.create({
   base: {
     minHeight: 54,
-    borderRadius: radius.md,
+    borderRadius: radius.button,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
     paddingHorizontal: spacing.lg,
-  },
-  ghost: {
-    backgroundColor: 'transparent',
   },
   label: {
     fontFamily: fonts.sansSemiBold,
     fontSize: 16,
+    letterSpacing: 0.2,
   },
 });

@@ -1,155 +1,190 @@
 import { useRouter } from 'expo-router';
-import React from 'react';
-import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 
+import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
+import { bumpHour, TimeStepperRow } from '@/components/TimeStepperRow';
+import { useToast } from '@/components/Toast';
 import { FREE_LIMITS, PREMIUM_LIMITS } from '@/constants/appConfig';
 import { track } from '@/services/analytics';
-import { formatTime } from '@/services/dates';
-import { requestNotificationPermission } from '@/services/notifications';
+import {
+  isNotificationPermissionDenied,
+  requestNotificationPermission,
+} from '@/services/notifications';
 import { usePreferences } from '@/state/PreferencesContext';
 import { useSubscription } from '@/state/SubscriptionContext';
 import { fonts, radius, spacing } from '@/theme/tokens';
 
-/** Selectable reminder times — every full hour from 06:00 to 23:00. */
-const TIME_OPTIONS = Array.from({ length: 18 }, (_, i) => formatTime(6 + i, 0));
-
+/**
+ * Reminders per the design: master toggle, one row per time with quiet
+ * − / + hour steppers, "Dodaj vreme" to append. On the free plan only the
+ * first reminder is active — the rest carry a discreet Premium lock.
+ * A soft banner appears when system notifications are denied.
+ */
 export default function Reminders() {
   const router = useRouter();
-  const { theme, preferences, updatePreferences } = usePreferences();
+  const { tokens, preferences, updatePreferences } = usePreferences();
   const { isPremium } = useSubscription();
-  const s = theme.surface;
+  const { showToast } = useToast();
+  const [denied, setDenied] = useState(false);
 
   const { notifications } = preferences;
-  const maxPerDay = isPremium
-    ? PREMIUM_LIMITS.notificationsPerDay
-    : FREE_LIMITS.notificationsPerDay;
+  const maxPerDay = PREMIUM_LIMITS.notificationsPerDay;
+
+  useEffect(() => {
+    void isNotificationPermissionDenied().then(setDenied);
+  }, []);
 
   const setEnabled = async (enabled: boolean) => {
     updatePreferences({ notifications: { ...notifications, enabled } });
     if (enabled) {
       await requestNotificationPermission();
+      setDenied(await isNotificationPermissionDenied());
       track('notification_enabled', { times: notifications.times.length });
     }
   };
 
-  const toggleTime = (time: string) => {
-    const selected = notifications.times.includes(time);
-    if (selected) {
-      updatePreferences({
-        notifications: {
-          ...notifications,
-          times: notifications.times.filter((t) => t !== time),
-        },
-      });
+  const setTime = (index: number, delta: number) => {
+    const times = notifications.times.map((t, i) => (i === index ? bumpHour(t, delta) : t));
+    updatePreferences({ notifications: { ...notifications, times } });
+  };
+
+  const addTime = () => {
+    if (!isPremium) {
+      router.push('/paywall?source=reminders');
       return;
     }
     if (notifications.times.length >= maxPerDay) {
-      if (!isPremium) router.push('/paywall?source=reminders');
+      showToast(`Najviše ${maxPerDay} podsetnika dnevno.`);
       return;
     }
     updatePreferences({
-      notifications: { ...notifications, times: [...notifications.times, time].sort() },
+      notifications: { ...notifications, times: [...notifications.times, '17:00'] },
     });
   };
 
   return (
-    <Screen
-      back
-      title="Podsetnici"
-      subtitle={
-        isPremium
-          ? `Do ${PREMIUM_LIMITS.notificationsPerDay} podsetnika dnevno, u vreme koje ti odgovara.`
-          : `Besplatno: ${FREE_LIMITS.notificationsPerDay} podsetnik dnevno. Uz Premium do ${PREMIUM_LIMITS.notificationsPerDay}.`
-      }>
-      <View style={[styles.switchRow, { backgroundColor: s.card, borderColor: s.border }]}>
-        <Text style={[styles.switchLabel, { color: s.text }]}>Dnevni podsetnici</Text>
-        <Switch value={notifications.enabled} onValueChange={(v) => void setEnabled(v)} />
-      </View>
-
-      {notifications.enabled && (
-        <>
-          <Text style={[styles.sectionLabel, { color: s.subtext }]}>
-            VREME ({notifications.times.length}/{maxPerDay})
-          </Text>
-          <View style={styles.chipWrap}>
-            {TIME_OPTIONS.map((time) => {
-              const selected = notifications.times.includes(time);
-              return (
-                <Pressable
-                  key={time}
-                  accessibilityRole="checkbox"
-                  accessibilityState={{ checked: selected }}
-                  onPress={() => toggleTime(time)}
-                  style={[
-                    styles.chip,
-                    {
-                      backgroundColor: s.card,
-                      borderColor: selected ? s.accent : s.border,
-                    },
-                  ]}>
-                  <Text style={[styles.chipText, { color: selected ? s.text : s.subtext }]}>
-                    {time}
-                  </Text>
-                </Pressable>
-              );
-            })}
+    <Screen back title="Podsetnici">
+      {denied && (
+        <View style={[styles.deniedCard, { backgroundColor: tokens.ghost }]}>
+          <View style={styles.deniedIcon}>
+            <Icon name="bell" size={18} color={tokens.sub} strokeWidth={1.6} />
           </View>
-          {!isPremium && (
+          <View style={styles.deniedBody}>
+            <Text style={[styles.deniedTitle, { color: tokens.ink }]}>
+              Obaveštenja su isključena
+            </Text>
+            <Text style={[styles.deniedText, { color: tokens.sub }]}>
+              Uključi ih u podešavanjima telefona da bi Sebi mogao da ti šalje misli.
+            </Text>
             <Pressable
               accessibilityRole="button"
-              onPress={() => router.push('/paywall?source=reminders')}
-              hitSlop={8}>
-              <Text style={[styles.upsell, { color: s.accent }]}>
-                Želiš više podsetnika dnevno? Pogledaj Premium →
+              onPress={() => void Linking.openSettings()}
+              hitSlop={6}>
+              <Text style={[styles.deniedLink, { color: tokens.ink }]}>
+                Otvori podešavanja telefona
               </Text>
             </Pressable>
-          )}
-        </>
+          </View>
+        </View>
       )}
+
+      <View style={styles.toggleRow}>
+        <Text style={[styles.toggleLabel, { color: tokens.ink }]}>Dnevni podsetnici</Text>
+        <Switch
+          value={notifications.enabled}
+          onValueChange={(v) => void setEnabled(v)}
+          trackColor={{ false: tokens.line, true: tokens.ink }}
+          thumbColor={tokens.surface}
+          ios_backgroundColor={tokens.line}
+        />
+      </View>
+
+      <View style={{ opacity: notifications.enabled ? 1 : 0.35 }}>
+        {notifications.times.map((time, i) => {
+          const locked = !isPremium && i >= FREE_LIMITS.notificationsPerDay;
+          return (
+            <TimeStepperRow
+              key={i}
+              time={time}
+              locked={locked}
+              onLockedPress={() => router.push('/paywall?source=reminders')}
+              onDecrement={() => setTime(i, -1)}
+              onIncrement={() => setTime(i, 1)}
+            />
+          );
+        })}
+        <Pressable accessibilityRole="button" onPress={addTime} style={styles.addTimeRow}>
+          <Icon name="plus" size={14} color={tokens.sub} strokeWidth={2} />
+          <Text style={[styles.addTimeLabel, { color: tokens.sub }]}>Dodaj vreme</Text>
+        </Pressable>
+        {!isPremium && (
+          <Text style={[styles.freeNote, { color: tokens.faint }]}>
+            Besplatna verzija uključuje jedan podsetnik dnevno. Više njih je deo Sebi Premium
+            paketa.
+          </Text>
+        )}
+      </View>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  switchRow: {
+  deniedCard: {
+    flexDirection: 'row',
+    gap: spacing.smd,
+    padding: spacing.md - 2,
+    borderRadius: radius.card,
+    marginBottom: spacing.sm,
+  },
+  deniedIcon: {
+    marginTop: 2,
+  },
+  deniedBody: {
+    flex: 1,
+    gap: 3,
+  },
+  deniedTitle: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 13.5,
+  },
+  deniedText: {
+    fontFamily: fonts.sans,
+    fontSize: 12.5,
+    lineHeight: 18,
+  },
+  deniedLink: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 12.5,
+    marginTop: spacing.sm - 2,
+  },
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
   },
-  switchLabel: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 16,
+  toggleLabel: {
+    fontFamily: fonts.sans,
+    fontSize: 15.5,
   },
-  sectionLabel: {
-    fontFamily: fonts.sansSemiBold,
-    fontSize: 12,
-    letterSpacing: 1.8,
-    marginTop: spacing.lg,
-    marginBottom: spacing.sm + 2,
-  },
-  chipWrap: {
+  addTimeRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    alignItems: 'center',
     gap: spacing.sm,
+    paddingVertical: spacing.md - 2,
+    paddingHorizontal: spacing.xs,
   },
-  chip: {
-    borderWidth: 1.5,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md - 2,
-  },
-  chipText: {
+  addTimeLabel: {
     fontFamily: fonts.sansMedium,
     fontSize: 14,
   },
-  upsell: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 14,
-    marginTop: spacing.lg,
+  freeNote: {
+    fontFamily: fonts.sans,
+    fontSize: 12,
+    lineHeight: 18,
+    paddingHorizontal: spacing.xs,
+    paddingTop: 2,
   },
 });

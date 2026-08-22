@@ -1,37 +1,46 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React, { useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/Icon';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { ThemedBackground } from '@/components/ThemedBackground';
+import { useToast } from '@/components/Toast';
 import { PRIVACY_URL, TERMS_URL } from '@/constants/appConfig';
 import type { SubscriptionPlan } from '@/models/types';
 import { track } from '@/services/analytics';
 import { usePreferences } from '@/state/PreferencesContext';
 import { useSubscription } from '@/state/SubscriptionContext';
-import { fonts, radius, spacing } from '@/theme/tokens';
+import { fonts, radius, spacing, type } from '@/theme/tokens';
 
 const BENEFITS = [
   'Sve kategorije',
   'Više dnevnih podsetnika',
   'Sve teme',
-  'Neograničeni favoriti',
-  'Novi sadržaj',
+  'Neograničene omiljene',
+  'Novi sadržaj svake nedelje',
 ];
 
+/**
+ * Sebi Premium paywall per the design: quiet close, serif headline,
+ * checked benefits, two plan cards with the annual one emphasized, one
+ * solid CTA. No countdowns, no dark patterns. A calm full-screen success
+ * state confirms the purchase.
+ */
 export default function Paywall() {
   const router = useRouter();
   const { source } = useLocalSearchParams<{ source?: string }>();
-  const { theme } = usePreferences();
+  const { theme, tokens } = usePreferences();
   const { isPremium, offerings, purchase, restore } = useSubscription();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
 
   const [selectedPlan, setSelectedPlan] = useState<SubscriptionPlan>('annual');
   const [busy, setBusy] = useState(false);
+  const [success, setSuccess] = useState(false);
 
   useEffect(() => {
     track('paywall_viewed', { source: source ?? 'unknown' });
@@ -52,9 +61,9 @@ export default function Paywall() {
     setBusy(true);
     try {
       const active = await purchase(selected.plan);
-      if (active) close();
+      if (active) setSuccess(true);
     } catch {
-      Alert.alert('Kupovina nije uspela', 'Pokušaj ponovo za koji trenutak.');
+      showToast('Nešto nije u redu. Kupovina nije uspela — pokušaj ponovo.');
     } finally {
       setBusy(false);
     }
@@ -66,177 +75,162 @@ export default function Paywall() {
     try {
       const active = await restore();
       if (active) {
-        Alert.alert('Kupovina je vraćena', 'Premium je ponovo aktivan.');
+        showToast('Kupovina je vraćena.');
         close();
       } else {
-        Alert.alert('Nema aktivne pretplate', 'Nismo pronašli prethodnu kupovinu.');
+        showToast('Nismo pronašli prethodnu kupovinu.');
       }
     } catch {
-      Alert.alert('Greška', 'Vraćanje kupovine nije uspelo. Pokušaj ponovo.');
+      showToast('Vraćanje kupovine nije uspelo. Pokušaj ponovo.');
     } finally {
       setBusy(false);
     }
   };
 
-  const ctaLabel = selected
-    ? selected.plan === 'annual'
-      ? `Nastavi — ${selected.priceString} godišnje`
-      : `Nastavi — ${selected.priceString} mesečno`
-    : 'Nastavi';
+  if (success) {
+    return (
+      <ThemedBackground theme={theme}>
+        <Animated.View entering={FadeIn.duration(350)} style={styles.successHost}>
+          <View style={[styles.successCircle, { borderColor: tokens.ink }]}>
+            <Icon name="check" size={26} color={tokens.ink} strokeWidth={1.8} />
+          </View>
+          <Text style={[styles.successTitle, { color: tokens.ink }]}>Sve je otključano.</Text>
+          <Text style={[styles.successText, { color: tokens.sub }]}>
+            Hvala ti što podržavaš Sebi. Sve kategorije, teme i podsetnici su sada tvoji.
+          </Text>
+          <PrimaryButton label="Nastavi" onPress={close} style={styles.successButton} />
+        </Animated.View>
+      </ThemedBackground>
+    );
+  }
 
   return (
     <ThemedBackground theme={theme}>
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.lg },
-        ]}
-        showsVerticalScrollIndicator={false}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Zatvori"
-          onPress={close}
-          hitSlop={12}
-          style={styles.closeButton}>
-          <Ionicons name="close" size={26} color={theme.subtle} />
-        </Pressable>
+      <View style={[styles.host, { paddingTop: insets.top + spacing.sm }]}>
+        <View style={styles.topRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Zatvori"
+            onPress={close}
+            hitSlop={8}
+            style={[styles.closeButton, { backgroundColor: tokens.ghost }]}>
+            <Icon name="close" size={15} color={tokens.sub} strokeWidth={2} />
+          </Pressable>
+        </View>
 
-        <Animated.View entering={FadeInDown.duration(400)} style={styles.body}>
-          <Text style={[styles.title, { color: theme.text }]}>
-            Više dobrih misli.{'\n'}Svaki dan.
-          </Text>
-
-          <View style={styles.benefits}>
-            {BENEFITS.map((benefit) => (
-              <View key={benefit} style={styles.benefitRow}>
-                <Ionicons name="checkmark" size={18} color={theme.text} />
-                <Text style={[styles.benefitText, { color: theme.text }]}>{benefit}</Text>
-              </View>
-            ))}
-          </View>
-
-          {isPremium ? (
-            <Text style={[styles.alreadyPremium, { color: theme.subtle }]}>
-              Premium je već aktivan. Hvala ti!
+        <ScrollView
+          contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}>
+          <Animated.View entering={FadeInDown.duration(400)}>
+            <Text style={[styles.eyebrow, { color: tokens.sub }]}>SEBI PREMIUM</Text>
+            <Text style={[styles.title, { color: tokens.ink }]}>
+              Više dobrih misli. Svaki dan.
             </Text>
-          ) : (
-            <View style={styles.plans}>
-              {annual && (
-                <PlanOption
-                  title="Godišnje"
-                  price={`${annual.priceString} / god.`}
-                  note={
-                    annual.perMonthPriceString
-                      ? `≈ ${annual.perMonthPriceString} mesečno`
-                      : 'Najbolja vrednost'
-                  }
-                  badge="PREPORUČENO"
-                  selected={selectedPlan === 'annual'}
-                  onPress={() => setSelectedPlan('annual')}
-                  themeDark={theme.dark}
-                  textColor={theme.text}
-                  subtleColor={theme.subtle}
-                />
-              )}
-              {monthly && (
-                <PlanOption
-                  title="Mesečno"
-                  price={`${monthly.priceString} / mes.`}
-                  selected={selectedPlan === 'monthly'}
-                  onPress={() => setSelectedPlan('monthly')}
-                  themeDark={theme.dark}
-                  textColor={theme.text}
-                  subtleColor={theme.subtle}
-                />
-              )}
-              {offerings.length === 0 && (
-                <Text style={[styles.alreadyPremium, { color: theme.subtle }]}>
-                  Ponude trenutno nisu dostupne. Pokušaj kasnije.
-                </Text>
-              )}
+
+            <View style={styles.benefits}>
+              {BENEFITS.map((benefit) => (
+                <View key={benefit} style={styles.benefitRow}>
+                  <Icon name="check" size={15} color={tokens.ink} strokeWidth={2} />
+                  <Text style={[styles.benefitText, { color: tokens.ink }]}>{benefit}</Text>
+                </View>
+              ))}
             </View>
-          )}
-        </Animated.View>
+
+            {isPremium ? (
+              <Text style={[styles.alreadyPremium, { color: tokens.sub }]}>
+                Premium je već aktivan. Hvala ti!
+              </Text>
+            ) : (
+              <View style={styles.plans}>
+                {annual && (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: selectedPlan === 'annual' }}
+                    onPress={() => setSelectedPlan('annual')}
+                    style={[
+                      styles.plan,
+                      selectedPlan === 'annual'
+                        ? { borderWidth: 1.5, borderColor: tokens.ink, backgroundColor: tokens.ghost }
+                        : { borderWidth: 1, borderColor: tokens.line },
+                    ]}>
+                    <View style={[styles.planBadge, { backgroundColor: tokens.ctaBg }]}>
+                      <Text style={[styles.planBadgeText, { color: tokens.ctaFg }]}>
+                        NAJBOLJA VREDNOST
+                      </Text>
+                    </View>
+                    <View>
+                      <Text style={[styles.planTitle, { color: tokens.ink }]}>Godišnje</Text>
+                      <Text style={[styles.planSub, { color: tokens.sub }]}>
+                        {annual.priceString} godišnje
+                      </Text>
+                    </View>
+                    {annual.perMonthPriceString && (
+                      <Text style={[styles.planRight, { color: tokens.ink }]}>
+                        ≈ {annual.perMonthPriceString} / mes
+                      </Text>
+                    )}
+                  </Pressable>
+                )}
+                {monthly && (
+                  <Pressable
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected: selectedPlan === 'monthly' }}
+                    onPress={() => setSelectedPlan('monthly')}
+                    style={[
+                      styles.plan,
+                      selectedPlan === 'monthly'
+                        ? { borderWidth: 1.5, borderColor: tokens.ink }
+                        : { borderWidth: 1, borderColor: tokens.line },
+                    ]}>
+                    <View>
+                      <Text style={[styles.planTitle, { color: tokens.ink }]}>Mesečno</Text>
+                      <Text style={[styles.planSub, { color: tokens.sub }]}>
+                        Naplata svakog meseca
+                      </Text>
+                    </View>
+                    <Text style={[styles.planRight, { color: tokens.ink }]}>
+                      {monthly.priceString} / mes
+                    </Text>
+                  </Pressable>
+                )}
+                {offerings.length === 0 && (
+                  <Text style={[styles.alreadyPremium, { color: tokens.sub }]}>
+                    Ponude trenutno nisu dostupne. Pokušaj kasnije.
+                  </Text>
+                )}
+              </View>
+            )}
+          </Animated.View>
+        </ScrollView>
 
         {!isPremium && (
-          <View style={styles.footer}>
+          <View style={[styles.footer, { paddingBottom: insets.bottom + spacing.md }]}>
             <PrimaryButton
-              label={ctaLabel}
-              onPress={handlePurchase}
-              dark={theme.dark}
+              label="Nastavi"
+              onPress={() => void handlePurchase()}
               loading={busy}
+              loadingLabel="Obrada…"
             />
-            <Text style={[styles.legalNote, { color: theme.subtle }]}>
-              Pretplata se automatski obnavlja. Otkaži bilo kada u podešavanjima prodavnice.
+            <Text style={[styles.legalNote, { color: tokens.faint }]}>
+              Otkaži bilo kada. Naplata preko prodavnice aplikacija.
             </Text>
             <View style={styles.links}>
-              <FooterLink label="Vrati kupovinu" onPress={handleRestore} color={theme.subtle} />
-              <FooterLink
-                label="Uslovi"
-                onPress={() => WebBrowser.openBrowserAsync(TERMS_URL)}
-                color={theme.subtle}
-              />
+              <FooterLink label="Vrati kupovinu" onPress={() => void handleRestore()} color={tokens.sub} />
               <FooterLink
                 label="Privatnost"
-                onPress={() => WebBrowser.openBrowserAsync(PRIVACY_URL)}
-                color={theme.subtle}
+                onPress={() => void WebBrowser.openBrowserAsync(PRIVACY_URL)}
+                color={tokens.sub}
+              />
+              <FooterLink
+                label="Uslovi"
+                onPress={() => void WebBrowser.openBrowserAsync(TERMS_URL)}
+                color={tokens.sub}
               />
             </View>
           </View>
         )}
-      </ScrollView>
-    </ThemedBackground>
-  );
-}
-
-function PlanOption({
-  title,
-  price,
-  note,
-  badge,
-  selected,
-  onPress,
-  themeDark,
-  textColor,
-  subtleColor,
-}: {
-  title: string;
-  price: string;
-  note?: string;
-  badge?: string;
-  selected: boolean;
-  onPress: () => void;
-  themeDark: boolean;
-  textColor: string;
-  subtleColor: string;
-}) {
-  const borderColor = selected ? textColor : themeDark ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.14)';
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      onPress={onPress}
-      style={[styles.plan, { borderColor, backgroundColor: themeDark ? 'rgba(255,255,255,0.05)' : 'rgba(255,255,255,0.45)' }]}>
-      <View style={styles.planText}>
-        <View style={styles.planTitleRow}>
-          <Text style={[styles.planTitle, { color: textColor }]}>{title}</Text>
-          {badge && (
-            <View style={[styles.badge, { backgroundColor: textColor }]}>
-              <Text style={[styles.badgeText, { color: themeDark ? '#1B1C24' : '#F7F4EE' }]}>
-                {badge}
-              </Text>
-            </View>
-          )}
-        </View>
-        <Text style={[styles.planPrice, { color: textColor }]}>{price}</Text>
-        {note && <Text style={[styles.planNote, { color: subtleColor }]}>{note}</Text>}
       </View>
-      <Ionicons
-        name={selected ? 'radio-button-on' : 'radio-button-off'}
-        size={22}
-        color={selected ? textColor : subtleColor}
-      />
-    </Pressable>
+    </ThemedBackground>
   );
 }
 
@@ -257,102 +251,140 @@ function FooterLink({
 }
 
 const styles = StyleSheet.create({
-  content: {
-    flexGrow: 1,
-    paddingHorizontal: spacing.lg,
+  host: {
+    flex: 1,
+  },
+  topRow: {
+    paddingHorizontal: spacing.md - 2,
   },
   closeButton: {
-    alignSelf: 'flex-end',
-    width: 36,
-    height: 36,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  body: {
-    flex: 1,
-    gap: spacing.xl,
+  content: {
     paddingTop: spacing.md,
+    paddingHorizontal: spacing.lg + 4,
+    paddingBottom: spacing.md,
+  },
+  eyebrow: {
+    ...type.eyebrow,
+    marginBottom: spacing.smd,
   },
   title: {
     fontFamily: fonts.serif,
-    fontSize: 34,
-    lineHeight: 44,
+    fontSize: 30,
+    lineHeight: 38,
+    marginBottom: spacing.lg,
   },
   benefits: {
-    gap: spacing.sm + 2,
+    gap: 13,
+    marginBottom: spacing.lg,
   },
   benefitRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm + 2,
+    gap: spacing.smd,
   },
   benefitText: {
     fontFamily: fonts.sans,
-    fontSize: 16,
+    fontSize: 14.5,
   },
   plans: {
-    gap: spacing.sm + 2,
+    gap: spacing.smd,
+    paddingTop: spacing.sm,
   },
   plan: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1.5,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    borderRadius: radius.button,
+    paddingVertical: 15,
+    paddingHorizontal: spacing.md,
   },
-  planText: {
-    flex: 1,
-    gap: 3,
+  planBadge: {
+    position: 'absolute',
+    top: -9,
+    left: 14,
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: radius.pill,
   },
-  planTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.sm,
+  planBadgeText: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 9.5,
+    letterSpacing: 1.2,
   },
   planTitle: {
     fontFamily: fonts.sansSemiBold,
-    fontSize: 16,
-  },
-  badge: {
-    borderRadius: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  badgeText: {
-    fontFamily: fonts.sansSemiBold,
-    fontSize: 10,
-    letterSpacing: 1,
-  },
-  planPrice: {
-    fontFamily: fonts.sans,
     fontSize: 15,
   },
-  planNote: {
+  planSub: {
     fontFamily: fonts.sans,
-    fontSize: 13,
+    fontSize: 12.5,
+    marginTop: 2,
+  },
+  planRight: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 13.5,
   },
   alreadyPremium: {
     fontFamily: fonts.sans,
     fontSize: 15,
+    paddingTop: spacing.sm,
   },
   footer: {
-    gap: spacing.md,
-    paddingTop: spacing.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    gap: spacing.smd,
   },
   legalNote: {
     fontFamily: fonts.sans,
-    fontSize: 12,
-    lineHeight: 17,
+    fontSize: 11,
     textAlign: 'center',
   },
   links: {
     flexDirection: 'row',
     justifyContent: 'center',
-    gap: spacing.lg,
+    gap: 18,
+    paddingBottom: spacing.sm,
   },
   linkText: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 13,
+    fontFamily: fonts.sans,
+    fontSize: 12,
+  },
+  successHost: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.md + 2,
+    paddingHorizontal: 40,
+  },
+  successCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 6,
+  },
+  successTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 26,
+    lineHeight: 34,
+    textAlign: 'center',
+  },
+  successText: {
+    fontFamily: fonts.sans,
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+  },
+  successButton: {
+    marginTop: spacing.smd,
+    alignSelf: 'stretch',
   },
 });

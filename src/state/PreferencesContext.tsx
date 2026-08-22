@@ -15,6 +15,7 @@ import { pushRecent } from '@/services/dailyContent';
 import { readJson, StorageKeys, writeJson } from '@/services/storage';
 import { EMPTY_STREAK, registerActiveDay } from '@/services/streak';
 import { DEFAULT_THEME_ID, getTheme, type AppTheme } from '@/theme/themes';
+import { tokensFor, type ThemeTokens } from '@/theme/tokens';
 import { useSubscription } from '@/state/SubscriptionContext';
 
 const DEFAULT_PREFERENCES: Preferences = {
@@ -34,6 +35,8 @@ interface PreferencesContextValue {
   ready: boolean;
   preferences: Preferences;
   theme: AppTheme;
+  /** Tokens derived from the theme's ink/surface (sub, faint, line, ghost…). */
+  tokens: ThemeTokens;
   favorites: string[];
   streak: StreakState;
   recentIds: string[];
@@ -123,12 +126,14 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   }, []);
 
   const theme = useMemo(() => getTheme(preferences.themeId), [preferences.themeId]);
+  const tokens = useMemo(() => tokensFor(theme), [theme]);
 
   const value = useMemo(
     () => ({
       ready,
       preferences,
       theme,
+      tokens,
       favorites,
       streak,
       recentIds,
@@ -141,6 +146,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       ready,
       preferences,
       theme,
+      tokens,
       favorites,
       streak,
       recentIds,

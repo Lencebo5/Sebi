@@ -1,32 +1,41 @@
 import { useRouter } from 'expo-router';
 import React, { useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/Icon';
 import { PrimaryButton } from '@/components/PrimaryButton';
-import { SelectableCard } from '@/components/SelectableCard';
+import { GoalChip, SelectableRow } from '@/components/SelectableCard';
 import { ThemedBackground } from '@/components/ThemedBackground';
+import { bumpHour, TimeStepperRow } from '@/components/TimeStepperRow';
+import { useToast } from '@/components/Toast';
 import { getAffirmationsByCategory } from '@/content/affirmations';
 import { FEELING_OPTIONS, GOAL_CATEGORIES } from '@/content/categories';
 import type { CategoryId } from '@/models/types';
 import { track } from '@/services/analytics';
 import { requestNotificationPermission } from '@/services/notifications';
 import { usePreferences } from '@/state/PreferencesContext';
-import { fonts, radius, spacing } from '@/theme/tokens';
+import { fonts, spacing, type } from '@/theme/tokens';
 
-const TIME_OPTIONS = ['07:00', '08:00', '09:00', '12:00', '14:00', '17:00', '20:00', '22:00'];
 const DEFAULT_TIMES = ['08:00', '14:00', '20:00'];
+const MAX_TIMES = 5;
+const STEPS = 5;
 
+/**
+ * Five-step onboarding per the design: emotional opener, goal grid,
+ * feelings, reminder times with hour steppers, personalized preview.
+ * One action per screen; progress dots with a stretched active pill.
+ */
 export default function Onboarding() {
   const router = useRouter();
-  const { theme, updatePreferences } = usePreferences();
+  const { theme, tokens, updatePreferences } = usePreferences();
+  const { showToast } = useToast();
   const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState(0);
   const [goals, setGoals] = useState<CategoryId[]>([]);
-  const [feelings, setFeelings] = useState<string[]>([]);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [feeling, setFeeling] = useState<string>(FEELING_OPTIONS[0].id);
   const [times, setTimes] = useState<string[]>(DEFAULT_TIMES);
 
   useMemo(() => track('onboarding_started'), []);
@@ -37,178 +46,179 @@ export default function Onboarding() {
       const pool = getAffirmationsByCategory(firstGoal);
       if (pool.length > 0) return pool[0].text;
     }
-    return 'Ne moram danas sve da rešim.\nDovoljno je da napravim sledeći korak.';
+    return 'Ne moram danas sve da rešim. Dovoljno je da napravim sledeći korak.';
   }, [goals]);
 
-  const toggle = <T,>(list: T[], value: T): T[] =>
-    list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
+  const toggleGoal = (id: CategoryId) =>
+    setGoals((g) => (g.includes(id) ? g.filter((v) => v !== id) : [...g, id]));
 
   const finish = async () => {
     updatePreferences({
       onboardingCompleted: true,
       goals,
-      feelings,
-      notifications: {
-        enabled: notificationsEnabled && times.length > 0,
-        times: [...times].sort(),
-      },
+      feelings: [feeling],
+      notifications: { enabled: times.length > 0, times: [...times].sort() },
     });
     track('onboarding_completed', { goals });
-    if (notificationsEnabled && times.length > 0) {
+    if (times.length > 0) {
       await requestNotificationPermission();
       track('notification_enabled', { times: times.length });
     }
     router.replace('/(tabs)');
   };
 
-  const s = theme.surface;
+  const skip = () => {
+    updatePreferences({
+      onboardingCompleted: true,
+      notifications: { enabled: true, times: DEFAULT_TIMES },
+    });
+    router.replace('/(tabs)');
+  };
 
-  const steps: { content: React.ReactNode; cta: string; onNext: () => void }[] = [
-    {
-      cta: 'Nastavi',
-      onNext: () => setStep(1),
-      content: (
-        <View style={styles.centerStep}>
-          <Text style={[styles.heroText, { color: theme.text }]}>
-            Svaki dan počinje jednom mišlju.
-          </Text>
-          <Text style={[styles.heroSubtitle, { color: theme.subtle }]}>
-            Odvoji nekoliko sekundi za sebe.
-          </Text>
-        </View>
-      ),
-    },
-    {
-      cta: 'Nastavi',
-      onNext: () => setStep(2),
-      content: (
-        <StepList title="Na čemu želiš da radiš?">
-          {GOAL_CATEGORIES.map((category) => (
-            <SelectableCard
-              key={category.id}
-              label={category.name}
-              selected={goals.includes(category.id)}
-              onPress={() => setGoals((g) => toggle(g, category.id))}
-              theme={theme}
-            />
-          ))}
-        </StepList>
-      ),
-    },
-    {
-      cta: 'Nastavi',
-      onNext: () => setStep(3),
-      content: (
-        <StepList title="Kako želiš da se osećaš?">
-          {FEELING_OPTIONS.map((option) => (
-            <SelectableCard
-              key={option.id}
-              label={option.label}
-              selected={feelings.includes(option.id)}
-              onPress={() => setFeelings((f) => toggle(f, option.id))}
-              theme={theme}
-            />
-          ))}
-        </StepList>
-      ),
-    },
-    {
-      cta: 'Nastavi',
-      onNext: () => setStep(4),
-      content: (
-        <StepList title="Podsetićemo te kada ti najviše znači.">
-          <View
-            style={[
-              styles.switchRow,
-              { backgroundColor: s.card, borderColor: s.border },
-            ]}>
-            <Text style={[styles.switchLabel, { color: s.text }]}>Dnevni podsetnici</Text>
-            <Switch value={notificationsEnabled} onValueChange={setNotificationsEnabled} />
-          </View>
-          {notificationsEnabled && (
-            <View style={styles.chipWrap}>
-              {TIME_OPTIONS.map((time) => {
-                const selected = times.includes(time);
-                return (
-                  <Pressable
-                    key={time}
-                    accessibilityRole="checkbox"
-                    accessibilityState={{ checked: selected }}
-                    onPress={() => setTimes((t) => toggle(t, time))}
-                    style={[
-                      styles.chip,
-                      {
-                        backgroundColor: s.card,
-                        borderColor: selected ? s.accent : s.border,
-                      },
-                    ]}>
-                    <Text style={[styles.chipText, { color: selected ? s.text : s.subtext }]}>
-                      {time}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-        </StepList>
-      ),
-    },
-    {
-      cta: 'Počni',
-      onNext: finish,
-      content: (
-        <View style={styles.centerStep}>
-          <Text style={[styles.previewLabel, { color: theme.subtle }]}>TVOJA PRVA MISAO</Text>
-          <Text style={[styles.previewText, { color: theme.text }]}>{previewText}</Text>
-        </View>
-      ),
-    },
-  ];
+  const addTime = () => {
+    if (times.length >= MAX_TIMES) {
+      showToast('Najviše 5 podsetnika dnevno.');
+      return;
+    }
+    setTimes((t) => [...t, '17:00']);
+  };
 
-  const current = steps[step];
+  const next = () => {
+    if (step < STEPS - 1) setStep(step + 1);
+    else void finish();
+  };
 
   return (
     <ThemedBackground theme={theme}>
       <View
         style={[
           styles.container,
-          { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.lg },
+          { paddingTop: insets.top + spacing.sm, paddingBottom: insets.bottom + spacing.mlg },
         ]}>
-        <View style={styles.progressRow}>
-          {steps.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.progressDot,
-                { backgroundColor: i <= step ? theme.text : theme.subtle, opacity: i <= step ? 0.9 : 0.3 },
-              ]}
-            />
-          ))}
+        {/* Header: back · progress dots · skip */}
+        <View style={styles.header}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Nazad"
+            disabled={step === 0}
+            onPress={() => setStep((s) => Math.max(0, s - 1))}
+            style={[styles.headerButton, { opacity: step > 0 ? 1 : 0 }]}>
+            <Icon name="chevronLeft" size={19} color={tokens.sub} strokeWidth={1.8} />
+          </Pressable>
+          <View style={styles.dots}>
+            {Array.from({ length: STEPS }, (_, i) => (
+              <View
+                key={i}
+                style={[
+                  styles.dot,
+                  {
+                    width: i === step ? 18 : 6,
+                    backgroundColor: i === step ? tokens.ink : tokens.outline,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={skip}
+            hitSlop={8}
+            style={styles.skipButton}>
+            <Text style={[styles.skipLabel, { color: tokens.faint }]}>Preskoči</Text>
+          </Pressable>
         </View>
+
         <Animated.View
           key={step}
-          entering={FadeIn.duration(350)}
-          exiting={FadeOut.duration(150)}
+          entering={FadeIn.duration(300)}
+          exiting={FadeOut.duration(140)}
           style={styles.stepBody}>
-          {current.content}
+          {step === 0 && (
+            <View style={styles.centerStep}>
+              <Text style={[styles.heroText, { color: tokens.ink }]}>
+                Svaki dan počinje jednom mišlju.
+              </Text>
+              <Text style={[styles.heroSubtitle, { color: tokens.sub }]}>
+                Odvoji nekoliko sekundi za sebe.
+              </Text>
+            </View>
+          )}
+
+          {step === 1 && (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
+              <Text style={[styles.stepTitle, { color: tokens.ink }]}>Na čemu želiš da radiš?</Text>
+              <Text style={[styles.stepSubtitle, { color: tokens.sub }]}>
+                Izaberi jednu ili više oblasti.
+              </Text>
+              <View style={styles.goalGrid}>
+                {GOAL_CATEGORIES.map((category) => (
+                  <View key={category.id} style={styles.goalCell}>
+                    <GoalChip
+                      categoryId={category.id}
+                      label={category.goalName ?? category.name}
+                      selected={goals.includes(category.id)}
+                      onPress={() => toggleGoal(category.id)}
+                    />
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+          )}
+
+          {step === 2 && (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
+              <Text style={[styles.stepTitle, { color: tokens.ink, marginBottom: spacing.lg }]}>
+                Kako želiš da se osećaš?
+              </Text>
+              {FEELING_OPTIONS.map((option) => (
+                <SelectableRow
+                  key={option.id}
+                  label={option.label}
+                  selected={feeling === option.id}
+                  onPress={() => setFeeling(option.id)}
+                />
+              ))}
+            </ScrollView>
+          )}
+
+          {step === 3 && (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
+              <Text style={[styles.stepTitle, { color: tokens.ink }]}>
+                Mala poruka u pravom trenutku.
+              </Text>
+              <Text style={[styles.stepSubtitle, { color: tokens.sub }]}>
+                Podsetnici tokom dana. Menjaš ih kasnije u Podešavanjima.
+              </Text>
+              {times.map((time, i) => (
+                <TimeStepperRow
+                  key={i}
+                  time={time}
+                  bordered
+                  onDecrement={() => setTimes((t) => t.map((v, j) => (j === i ? bumpHour(v, -1) : v)))}
+                  onIncrement={() => setTimes((t) => t.map((v, j) => (j === i ? bumpHour(v, 1) : v)))}
+                />
+              ))}
+              <Pressable
+                accessibilityRole="button"
+                onPress={addTime}
+                style={styles.addTimeRow}>
+                <Icon name="plus" size={14} color={tokens.sub} strokeWidth={2} />
+                <Text style={[styles.addTimeLabel, { color: tokens.sub }]}>Dodaj vreme</Text>
+              </Pressable>
+            </ScrollView>
+          )}
+
+          {step === 4 && (
+            <View style={styles.centerStep}>
+              <Text style={[styles.previewLabel, { color: tokens.sub }]}>TVOJA PRVA MISAO</Text>
+              <Text style={[styles.previewText, { color: tokens.ink }]}>{previewText}</Text>
+            </View>
+          )}
         </Animated.View>
-        <PrimaryButton label={current.cta} onPress={current.onNext} dark={theme.dark} />
+
+        <PrimaryButton label={step === STEPS - 1 ? 'Počni' : 'Nastavi'} onPress={next} />
       </View>
     </ThemedBackground>
-  );
-}
-
-function StepList({ title, children }: { title: string; children: React.ReactNode }) {
-  const { theme } = usePreferences();
-  return (
-    <View style={styles.stepList}>
-      <Text style={[styles.stepTitle, { color: theme.text }]}>{title}</Text>
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.stepListContent}>
-        {children}
-      </ScrollView>
-    </View>
   );
 }
 
@@ -217,84 +227,100 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: spacing.lg,
   },
-  progressRow: {
+  header: {
     flexDirection: 'row',
-    justifyContent: 'center',
-    gap: spacing.sm,
-    marginBottom: spacing.lg,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginHorizontal: -spacing.smd,
   },
-  progressDot: {
-    width: 6,
+  headerButton: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  dot: {
     height: 6,
-    borderRadius: 3,
+    borderRadius: 999,
+  },
+  skipButton: {
+    height: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.smd,
+  },
+  skipLabel: {
+    fontFamily: fonts.sans,
+    fontSize: 12.5,
   },
   stepBody: {
     flex: 1,
   },
   centerStep: {
     flex: 1,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: spacing.lg,
+    gap: spacing.md,
+    paddingHorizontal: spacing.sm,
   },
   heroText: {
     fontFamily: fonts.serif,
-    fontSize: 36,
-    lineHeight: 48,
+    fontSize: 31,
+    lineHeight: 42,
+    textAlign: 'center',
   },
   heroSubtitle: {
     fontFamily: fonts.sans,
-    fontSize: 17,
-    lineHeight: 26,
+    fontSize: 15,
+    textAlign: 'center',
   },
-  stepList: {
-    flex: 1,
-    gap: spacing.lg,
+  listStep: {
+    paddingTop: spacing.xl + 2,
+    paddingBottom: spacing.lg,
   },
   stepTitle: {
     fontFamily: fonts.serif,
-    fontSize: 28,
-    lineHeight: 38,
+    fontSize: 26,
+    lineHeight: 34,
+    marginBottom: 6,
   },
-  stepListContent: {
-    gap: spacing.sm + 2,
-    paddingBottom: spacing.lg,
+  stepSubtitle: {
+    fontFamily: fonts.sans,
+    fontSize: 13.5,
+    marginBottom: spacing.lg,
   },
-  switchRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1.5,
-    borderRadius: radius.md,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
-  },
-  switchLabel: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 16,
-  },
-  chipWrap: {
+  goalGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: spacing.sm + 2,
+    gap: 10,
   },
-  chip: {
-    borderWidth: 1.5,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+  goalCell: {
+    flexBasis: '48%',
+    flexGrow: 1,
   },
-  chipText: {
+  addTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.xs,
+  },
+  addTimeLabel: {
     fontFamily: fonts.sansMedium,
-    fontSize: 15,
+    fontSize: 14,
   },
   previewLabel: {
-    fontFamily: fonts.sansSemiBold,
-    fontSize: 12,
-    letterSpacing: 2.4,
+    ...type.eyebrow,
   },
   previewText: {
     fontFamily: fonts.serif,
-    fontSize: 30,
-    lineHeight: 44,
+    fontSize: 28,
+    lineHeight: 40,
+    textAlign: 'center',
+    maxWidth: 320,
   },
 });

@@ -1,11 +1,12 @@
-import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
 import React from 'react';
-import { Alert, Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
+import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
+import { useToast } from '@/components/Toast';
 import {
   APP_NAME,
   APP_STORE_URL,
@@ -17,54 +18,72 @@ import { usePreferences } from '@/state/PreferencesContext';
 import { useSubscription } from '@/state/SubscriptionContext';
 import { fonts, radius, spacing } from '@/theme/tokens';
 
+interface Row {
+  label: string;
+  onPress: () => void;
+  /** Ghost pill next to the chevron (e.g. "Aktivan"). */
+  badge?: string;
+  /** Starts a new visual group. */
+  gapAbove?: boolean;
+}
+
+/**
+ * Settings as quiet native-feeling rows on the theme background — hairline
+ * separators and grouped spacing instead of cards, per the design.
+ */
 export default function Settings() {
   const router = useRouter();
-  const { theme } = usePreferences();
+  const { tokens } = usePreferences();
   const { isPremium, restore, adapterName } = useSubscription();
-  const s = theme.surface;
+  const { showToast } = useToast();
 
   const storeUrl = Platform.OS === 'android' ? PLAY_STORE_URL : APP_STORE_URL;
 
   const handleRestore = async () => {
     try {
       const active = await restore();
-      Alert.alert(
-        active ? 'Kupovina je vraćena' : 'Nema aktivne pretplate',
-        active ? 'Premium je ponovo aktivan.' : 'Nismo pronašli prethodnu kupovinu.',
-      );
+      showToast(active ? 'Kupovina je vraćena.' : 'Nismo pronašli prethodnu kupovinu.');
     } catch {
-      Alert.alert('Greška', 'Vraćanje kupovine nije uspelo. Pokušaj ponovo.');
+      showToast('Vraćanje kupovine nije uspelo. Pokušaj ponovo.');
     }
   };
 
   const shareApp = () => {
     void Share.share({
-      message: `${APP_NAME} — kratka dobra misao svakog dana. ${storeUrl}`,
+      message: `${APP_NAME} — dobre misli za svaki dan. ${storeUrl}`,
     });
   };
 
-  const rows: { label: string; icon: keyof typeof Ionicons.glyphMap; onPress: () => void; note?: string }[] = [
-    { label: 'Moji ciljevi', icon: 'flag-outline', onPress: () => router.push('/settings/goals') },
-    { label: 'Podsetnici', icon: 'notifications-outline', onPress: () => router.push('/settings/reminders') },
-    { label: 'Izgled', icon: 'color-palette-outline', onPress: () => router.push('/settings/appearance') },
+  const rows: Row[] = [
+    { label: 'Moji ciljevi', onPress: () => router.push('/settings/goals') },
+    { label: 'Podsetnici', onPress: () => router.push('/settings/reminders') },
+    { label: 'Izgled', onPress: () => router.push('/settings/appearance') },
     {
-      label: 'Premium',
-      icon: 'star-outline',
-      note: isPremium ? 'Aktivan' : undefined,
+      label: 'Sebi Premium',
+      gapAbove: true,
+      badge: isPremium ? 'Aktivan' : undefined,
       onPress: () => router.push('/paywall?source=settings'),
     },
-    { label: 'Oceni aplikaciju', icon: 'thumbs-up-outline', onPress: () => void WebBrowser.openBrowserAsync(storeUrl) },
-    { label: 'Podeli aplikaciju', icon: 'gift-outline', onPress: shareApp },
-    { label: 'Privatnost', icon: 'shield-checkmark-outline', onPress: () => void WebBrowser.openBrowserAsync(PRIVACY_URL) },
-    { label: 'Uslovi korišćenja', icon: 'document-text-outline', onPress: () => void WebBrowser.openBrowserAsync(TERMS_URL) },
-    { label: 'Vrati kupovinu', icon: 'refresh-outline', onPress: handleRestore },
+    {
+      label: 'Oceni aplikaciju',
+      gapAbove: true,
+      onPress: () => void WebBrowser.openBrowserAsync(storeUrl),
+    },
+    { label: 'Podeli aplikaciju', onPress: shareApp },
+    {
+      label: 'Privatnost',
+      gapAbove: true,
+      onPress: () => void WebBrowser.openBrowserAsync(PRIVACY_URL),
+    },
+    { label: 'Uslovi korišćenja', onPress: () => void WebBrowser.openBrowserAsync(TERMS_URL) },
+    { label: 'Vrati kupovinu', onPress: () => void handleRestore() },
   ];
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
   return (
     <Screen title="Podešavanja">
-      <View style={styles.list}>
+      <View>
         {rows.map((row) => (
           <Pressable
             key={row.label}
@@ -72,18 +91,24 @@ export default function Settings() {
             onPress={row.onPress}
             style={({ pressed }) => [
               styles.row,
-              { backgroundColor: s.card, borderColor: s.border },
-              pressed && { opacity: 0.85 },
+              { borderBottomColor: tokens.line },
+              row.gapAbove && { marginTop: spacing.lg + 2 },
+              pressed && { opacity: 0.7 },
             ]}>
-            <Ionicons name={row.icon} size={20} color={s.subtext} />
-            <Text style={[styles.label, { color: s.text }]}>{row.label}</Text>
-            {row.note && <Text style={[styles.note, { color: s.accent }]}>{row.note}</Text>}
-            <Ionicons name="chevron-forward" size={16} color={s.subtext} />
+            <Text style={[styles.label, { color: tokens.ink }]}>{row.label}</Text>
+            <View style={styles.rowRight}>
+              {row.badge && (
+                <View style={[styles.badge, { backgroundColor: tokens.ghost }]}>
+                  <Text style={[styles.badgeText, { color: tokens.sub }]}>{row.badge}</Text>
+                </View>
+              )}
+              <Icon name="chevronRight" size={13} color={tokens.faint} strokeWidth={1.8} />
+            </View>
           </Pressable>
         ))}
       </View>
-      <Text style={[styles.version, { color: s.subtext }]}>
-        {APP_NAME} v{version}
+      <Text style={[styles.version, { color: tokens.faint }]}>
+        {APP_NAME} · verzija {version}
         {adapterName === 'mock' ? ' · dev režim pretplate' : ''}
       </Text>
     </Screen>
@@ -91,31 +116,36 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
-  list: {
-    gap: spacing.sm,
-  },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.md + 2,
-    gap: spacing.md,
+    justifyContent: 'space-between',
+    minHeight: 52,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   label: {
-    flex: 1,
-    fontFamily: fonts.sansMedium,
-    fontSize: 15,
+    fontFamily: fonts.sans,
+    fontSize: 15.5,
   },
-  note: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 13,
+  rowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  badge: {
+    paddingVertical: 3,
+    paddingHorizontal: 9,
+    borderRadius: radius.pill,
+  },
+  badgeText: {
+    fontFamily: fonts.sansSemiBold,
+    fontSize: 11,
+    letterSpacing: 0.5,
   },
   version: {
     fontFamily: fonts.sans,
     fontSize: 12,
     textAlign: 'center',
-    marginTop: spacing.xl,
+    paddingTop: spacing.lg + 2,
   },
 });

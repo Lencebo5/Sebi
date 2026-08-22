@@ -1,7 +1,9 @@
-# Danas
+# Sebi
 
-Aplikacija za dnevne afirmacije na srpskom jeziku (latinica). "Danas" je radno
-ime — finalno ime se menja u `src/constants/appConfig.ts` i `app.json`.
+**Dobre misli za svaki dan.** Aplikacija za dnevne afirmacije na srpskom
+jeziku (latinica), sa vizuelnim identitetom iz Claude Design handoff-a:
+Literata za misli, Schibsted Grotesk za UI, 12 tema (4 besplatne + 8 Premium
+sa slojevitim pozadinama).
 
 Jedna misao dnevno, lepe teme, podsetnici, favoriti i deljenje — bez naloga,
 bez servera. Sve se čuva lokalno na uređaju.
@@ -65,8 +67,9 @@ src/
   ima `annual` i `monthly` pakete. Cene na paywall-u dolaze iz prodavnice —
   ništa nije hardkodovano.
 - **Premium kategorije**: `premium` flag u `src/content/categories.ts`.
-- **Besplatne teme**: prve 3 u nizu `THEMES` (`src/theme/themes.ts`);
-  limiti su u `FREE_LIMITS` (`src/constants/appConfig.ts`).
+- **Besplatne teme**: `premium` flag po temi u `src/theme/themes.ts`
+  (Linen, Midnight, Sage i Rose su besplatne); ostali limiti su u
+  `FREE_LIMITS` (`src/constants/appConfig.ts`).
 - **Novi sadržaj**: dodaj afirmacije u `src/content/affirmations.ts`
   (id-jevi su stabilni — ne menjati postojeće).
 - **Pravne stranice i store linkovi**: `PRIVACY_URL`, `TERMS_URL`,
@@ -77,7 +80,7 @@ src/
 Lokalne notifikacije ne mogu da biraju novu afirmaciju u trenutku okidanja,
 pa se unapred zakazuje narednih 7 dana (svaki termin sa drugom afirmacijom).
 Raspored se ponovo gradi pri svakom otvaranju aplikacije i pri svakoj promeni
-podešavanja. Besplatan plan: 1 podsetnik dnevno; Premium: do 10.
+podešavanja. Besplatan plan: 1 podsetnik dnevno; Premium: do 5.
 
 ## Analitika
 

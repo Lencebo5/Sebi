@@ -1,15 +1,17 @@
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/Icon';
+import { ThemedBackground } from '@/components/ThemedBackground';
 import { usePreferences } from '@/state/PreferencesContext';
-import { fonts, spacing } from '@/theme/tokens';
+import { fonts, spacing, TAB_BAR_CONTENT_INSET } from '@/theme/tokens';
 
 /**
- * Standard scrollable screen with the theme's surface background and an
- * editorial serif title. Used by list/settings screens.
+ * Standard screen over the full theme background with an editorial Literata
+ * title. Tab screens use the large 28px title; pushed sub-screens show a
+ * back chevron and a 26px title, per the design.
  */
 export function Screen({
   title,
@@ -25,10 +27,9 @@ export function Screen({
   /** Show a back button (for pushed sub-screens). */
   back?: boolean;
 }) {
-  const { theme } = usePreferences();
+  const { theme, tokens } = usePreferences();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const s = theme.surface;
 
   const header = (
     <View style={styles.header}>
@@ -39,38 +40,42 @@ export function Screen({
           onPress={() => router.back()}
           hitSlop={12}
           style={styles.backButton}>
-          <Ionicons name="chevron-back" size={24} color={s.text} />
+          <Icon name="chevronLeft" size={19} color={tokens.ink} style={{ opacity: 0.75 }} />
         </Pressable>
       )}
-      <Text style={[styles.title, { color: s.text }]}>{title}</Text>
-      {subtitle ? <Text style={[styles.subtitle, { color: s.subtext }]}>{subtitle}</Text> : null}
+      <Text style={[back ? styles.subScreenTitle : styles.title, { color: tokens.ink }]}>
+        {title}
+      </Text>
+      {subtitle ? (
+        <Text style={[styles.subtitle, { color: tokens.sub }]}>{subtitle}</Text>
+      ) : null}
     </View>
   );
 
-  if (!scroll) {
-    return (
-      <View
-        style={[
-          styles.container,
-          { backgroundColor: s.background, paddingTop: insets.top + spacing.lg },
-        ]}>
-        {header}
-        {children}
-      </View>
-    );
-  }
+  const topPadding = insets.top + (back ? spacing.sm : spacing.xl);
 
   return (
-    <ScrollView
-      style={{ backgroundColor: s.background }}
-      contentContainerStyle={[
-        styles.content,
-        { paddingTop: insets.top + spacing.lg, paddingBottom: insets.bottom + spacing.xxl },
-      ]}
-      showsVerticalScrollIndicator={false}>
-      {header}
-      {children}
-    </ScrollView>
+    <ThemedBackground theme={theme}>
+      {scroll ? (
+        <ScrollView
+          contentContainerStyle={[
+            styles.content,
+            {
+              paddingTop: topPadding,
+              paddingBottom: insets.bottom + TAB_BAR_CONTENT_INSET + spacing.lg,
+            },
+          ]}
+          showsVerticalScrollIndicator={false}>
+          {header}
+          {children}
+        </ScrollView>
+      ) : (
+        <View style={[styles.container, { paddingTop: topPadding }]}>
+          {header}
+          {children}
+        </View>
+      )}
+    </ThemedBackground>
   );
 }
 
@@ -83,24 +88,29 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
   },
   header: {
-    marginBottom: spacing.lg,
-    gap: spacing.sm,
+    marginBottom: spacing.md,
   },
   backButton: {
-    width: 32,
-    height: 32,
+    width: 44,
+    height: 44,
     justifyContent: 'center',
-    marginLeft: -6,
-    marginBottom: spacing.xs,
+    marginLeft: -spacing.smd,
   },
   title: {
     fontFamily: fonts.serif,
-    fontSize: 30,
-    lineHeight: 38,
+    fontSize: 28,
+    lineHeight: 37,
+    marginTop: spacing.md,
+  },
+  subScreenTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 26,
+    lineHeight: 34,
   },
   subtitle: {
     fontFamily: fonts.sans,
-    fontSize: 15,
-    lineHeight: 22,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: spacing.xs + 2,
   },
 });
