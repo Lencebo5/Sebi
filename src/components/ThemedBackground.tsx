@@ -1,24 +1,31 @@
+import { LinearGradient as ExpoLinearGradient } from 'expo-linear-gradient';
 import React, { useState } from 'react';
 import { StyleSheet, View, type LayoutChangeEvent } from 'react-native';
-import Svg, { Defs, Line, LinearGradient, RadialGradient, Rect, Stop } from 'react-native-svg';
+import Svg, { Ellipse, Line } from 'react-native-svg';
 
 import { defaultLayers, type AppTheme, type BackgroundLayer, type GradientStop } from '@/theme/themes';
 
 /**
- * Full-bleed layered theme background. Free themes are a single radial
- * wash (a → b); premium themes stack soft glows, horizons and grain —
- * everything drawn locally, no images.
+ * Full-bleed layered theme background. Free themes are a soft wash (a → b);
+ * premium themes stack glows, horizons and grain — everything drawn
+ * locally, no images.
  *
  * Layers follow the prototype's CSS ordering (`layers[0]` on top), so they
  * are rendered in reverse.
  *
- * IMPORTANT (real-device rendering): everything is expressed in
- * `userSpaceOnUse` pixel coordinates computed from the measured layout.
- * Percentage radii in objectBoundingBox units silently fail in
- * react-native-svg on native Android/iOS — the unresolved gradient paints
- * the rect BLACK, which turned the whole app near-black on real phones
- * while looking correct in web previews. Never reintroduce percentage
- * based gradients here.
+ * IMPORTANT (real-device rendering): this component deliberately uses NO
+ * SVG gradient brushes (<Defs> + url(#…) fills). On real Android builds of
+ * this app they fail to resolve and react-native-svg paints the referencing
+ * shape BLACK — which turned the whole app near-black on device while web
+ * previews looked fine. Instead:
+ *   - linear layers use expo-linear-gradient (independent native module);
+ *   - translucent radial glows are stacks of plain-fill ellipses with tiny
+ *     per-ring opacity steps (plain fills are the same reliable path the
+ *     app's icons already render through);
+ *   - opaque radial washes (the free themes' a → b base) render as a
+ *     vertical expo-linear-gradient, which is visually equivalent;
+ *   - paper grain is plain-stroke lines.
+ * Do not reintroduce SVG gradient/pattern brushes here.
  */
 export function ThemedBackground({
   theme,
@@ -38,92 +45,134 @@ export function ThemedBackground({
   };
 
   return (
-    <View
-      onLayout={onLayout}
-      style={[styles.fill, { backgroundColor: theme.b }, style]}>
-      {size.w > 0 && size.h > 0 && (
-        <Svg
-          pointerEvents="none"
-          style={StyleSheet.absoluteFill}
-          width={size.w}
-          height={size.h}>
-          <Defs>
-            {layers.map((layer, i) =>
-              layer.kind === 'grain' ? null : (
-                <LayerDef key={i} id={`${theme.id}-l${i}`} layer={layer} w={size.w} h={size.h} />
-              ),
-            )}
-          </Defs>
-          {[...layers].reverse().map((layer, i) => {
-            const index = layers.length - 1 - i;
-            if (layer.kind === 'grain') {
-              return <GrainLines key={index} layer={layer} w={size.w} h={size.h} />;
-            }
-            return (
-              <Rect
-                key={index}
-                x={0}
-                y={0}
-                width={size.w}
-                height={size.h}
-                fill={`url(#${theme.id}-l${index})`}
-              />
-            );
-          })}
-        </Svg>
-      )}
+    <View onLayout={onLayout} style={[styles.fill, { backgroundColor: theme.b }, style]}>
+      {size.w > 0 &&
+        size.h > 0 &&
+        [...layers].reverse().map((layer, i) => (
+          <LayerView key={layers.length - 1 - i} layer={layer} w={size.w} h={size.h} />
+        ))}
       {children}
     </View>
   );
 }
 
-function LayerDef({
-  id,
-  layer,
-  w,
-  h,
-}: {
-  id: string;
-  layer: Exclude<BackgroundLayer, { kind: 'grain' }>;
-  w: number;
-  h: number;
-}) {
+function LayerView({ layer, w, h }: { layer: BackgroundLayer; w: number; h: number }) {
   if (layer.kind === 'linear') {
-    // All design layers run top → bottom.
     return (
-      <LinearGradient id={id} x1={0} y1={0} x2={0} y2={h} gradientUnits="userSpaceOnUse">
-        {layer.stops.map((stop, i) => (
-          <GradientStopEl key={i} stop={stop} />
-        ))}
-      </LinearGradient>
+      <ExpoLinearGradient
+        pointerEvents="none"
+        colors={layer.stops.map((s) => s.color) as [string, string, ...string[]]}
+        locations={layer.stops.map((s) => s.pos) as [number, number, ...number[]]}
+        style={StyleSheet.absoluteFill}
+      />
     );
   }
-  // Radial glows fade to transparent past the last stop.
-  const stops: GradientStop[] = [
-    ...layer.stops,
-    { color: transparentEdge(last(layer.stops).color), pos: 1 },
-  ];
+  if (layer.kind === 'grain') {
+    return (
+      <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width={w} height={h}>
+        <GrainLines layer={layer} w={w} h={h} />
+      </Svg>
+    );
+  }
+  // Radial. Fully opaque washes (free-theme base) → vertical native
+  // gradient; translucent glows → concentric plain-fill ellipse stack.
+  const parsed = layer.stops.map((s) => ({ pos: s.pos, ...parseColor(s.color) }));
+  if (parsed.every((s) => s.alpha >= 1)) {
+    return (
+      <ExpoLinearGradient
+        pointerEvents="none"
+        colors={parsed.map((s) => s.hex) as [string, string, ...string[]]}
+        locations={parsed.map((s) => s.pos) as [number, number, ...number[]]}
+        style={StyleSheet.absoluteFill}
+      />
+    );
+  }
   return (
-    <RadialGradient
-      id={id}
-      cx={layer.cx * w}
-      cy={layer.cy * h}
-      rx={(layer.w / 2) * w}
-      ry={(layer.h / 2) * h}
-      fx={layer.cx * w}
-      fy={layer.cy * h}
-      gradientUnits="userSpaceOnUse">
-      {stops.map((stop, i) => (
-        <GradientStopEl key={i} stop={stop} />
-      ))}
-    </RadialGradient>
+    <Svg pointerEvents="none" style={StyleSheet.absoluteFill} width={w} height={h}>
+      <GlowEllipses layer={layer} stops={parsed} w={w} h={h} />
+    </Svg>
   );
 }
 
+interface ParsedStop {
+  pos: number;
+  hex: string;
+  alpha: number;
+}
+
 /**
- * Fine paper grain (Papir): thin parallel strokes at an angle, drawn as
- * explicit lines instead of an SVG <Pattern> — patterns share the same
- * unreliable-native-brush problem as percentage gradients.
+ * Soft radial glow approximated by N concentric ellipses painted largest
+ * first. Ring k covers radius ≤ r_k and adds just enough opacity that the
+ * cumulative coverage at its radius matches the gradient's target alpha —
+ * per-ring deltas stay ≈0.03, far below visible banding on these subtle
+ * washes.
+ */
+function GlowEllipses({
+  layer,
+  stops,
+  w,
+  h,
+}: {
+  layer: Extract<BackgroundLayer, { kind: 'radial' }>;
+  stops: ParsedStop[];
+  w: number;
+  h: number;
+}) {
+  const RINGS = 32;
+  const cx = layer.cx * w;
+  const cy = layer.cy * h;
+  const rx = (layer.w / 2) * w;
+  const ry = (layer.h / 2) * h;
+
+  // Target alpha/color along t∈[0,1]; past the last stop it fades to 0.
+  const track: ParsedStop[] = [...stops];
+  if (track[track.length - 1].alpha > 0 || track[track.length - 1].pos < 1) {
+    track.push({ pos: 1, hex: track[track.length - 1].hex, alpha: 0 });
+  }
+  const sample = (t: number): { hex: string; alpha: number } => {
+    if (t <= track[0].pos) return track[0];
+    for (let i = 1; i < track.length; i++) {
+      if (t <= track[i].pos) {
+        const a = track[i - 1];
+        const b = track[i];
+        const f = b.pos === a.pos ? 0 : (t - a.pos) / (b.pos - a.pos);
+        return { hex: mixHex(a.hex, b.hex, f), alpha: a.alpha + (b.alpha - a.alpha) * f };
+      }
+    }
+    return track[track.length - 1];
+  };
+
+  const rings = [];
+  // Largest → smallest; cumulative alpha after painting ring at radius t
+  // must equal sample(t).alpha, so each ring adds the increment relative
+  // to what is already painted beneath it.
+  let covered = 0;
+  for (let k = RINGS; k >= 1; k--) {
+    const t = k / RINGS;
+    const target = sample(t === 1 ? 1 : t);
+    const remaining = 1 - covered;
+    const delta = remaining <= 0 ? 0 : (target.alpha - covered) / remaining;
+    if (delta > 0.001) {
+      rings.push(
+        <Ellipse
+          key={k}
+          cx={cx}
+          cy={cy}
+          rx={rx * t}
+          ry={ry * t}
+          fill={target.hex}
+          fillOpacity={Math.min(delta, 1)}
+        />,
+      );
+      covered = covered + remaining * Math.min(delta, 1);
+    }
+  }
+  return <>{rings}</>;
+}
+
+/**
+ * Fine paper grain (Papir): thin parallel plain strokes at an angle —
+ * never an SVG <Pattern>, which is another unreliable native brush.
  */
 function GrainLines({
   layer,
@@ -167,20 +216,15 @@ function GrainLines({
   return <>{lines}</>;
 }
 
-function GradientStopEl({ stop }: { stop: GradientStop }) {
-  const { hex, alpha } = parseColor(stop.color);
-  return <Stop offset={stop.pos} stopColor={hex} stopOpacity={alpha} />;
-}
-
-function last<T>(items: T[]): T {
-  return items[items.length - 1];
-}
-
-/** The same hue as `color`, fully transparent. */
-function transparentEdge(color: string): string {
-  const { hex } = parseColor(color);
-  const n = parseInt(hex.slice(1), 16);
-  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},0)`;
+/** Linear-interpolate two '#RRGGBB' colors. */
+function mixHex(a: string, b: string, f: number): string {
+  const na = parseInt(a.slice(1), 16);
+  const nb = parseInt(b.slice(1), 16);
+  const ch = (sa: number, sb: number) => Math.round(sa + (sb - sa) * f);
+  const r = ch((na >> 16) & 255, (nb >> 16) & 255);
+  const g = ch((na >> 8) & 255, (nb >> 8) & 255);
+  const bl = ch(na & 255, nb & 255);
+  return `#${((r << 16) | (g << 8) | bl).toString(16).padStart(6, '0')}`;
 }
 
 /** Split '#RRGGBB' or 'rgba(r,g,b,a)' into a hex color + opacity. */
