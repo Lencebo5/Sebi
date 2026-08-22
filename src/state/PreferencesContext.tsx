@@ -9,7 +9,12 @@ import React, {
 } from 'react';
 
 import { FREE_LIMITS } from '@/constants/appConfig';
-import type { Preferences, StreakState } from '@/models/types';
+import type {
+  CategoryId,
+  PersonalizationProfile,
+  Preferences,
+  StreakState,
+} from '@/models/types';
 import { track } from '@/services/analytics';
 import { pushRecent } from '@/services/dailyContent';
 import { readJson, StorageKeys, writeJson } from '@/services/storage';
@@ -18,22 +23,99 @@ import { DEFAULT_THEME_ID, getTheme, type AppTheme } from '@/theme/themes';
 import { tokensFor, type ThemeTokens } from '@/theme/tokens';
 import { useSubscription } from '@/state/SubscriptionContext';
 
-const DEFAULT_PREFERENCES: Preferences = {
-  onboardingCompleted: false,
+export const DEFAULT_PROFILE: PersonalizationProfile = {
   goals: [],
-  feelings: [],
+  currentChallenges: [],
+  lifeContexts: [],
+  addressMode: 'neutral',
+  deliveryStyle: 'mixed',
+};
+
+const DEFAULT_PREFERENCES: Preferences = {
+  version: 2,
+  onboardingCompleted: false,
+  profile: DEFAULT_PROFILE,
   themeId: DEFAULT_THEME_ID,
+  // Off by default: onboarding no longer configures reminders, and the
+  // permission prompt must not appear right after onboarding. Users enable
+  // reminders in Podešavanja → Podsetnici (which requests permission).
   notifications: {
-    enabled: true,
+    enabled: false,
     times: ['08:00', '14:00', '20:00'],
   },
 };
+
+/** Pre-personalization persisted shape (schema v1, had no `version` field). */
+interface LegacyPreferencesV1 {
+  onboardingCompleted?: boolean;
+  goals?: string[];
+  feelings?: string[];
+  themeId?: string;
+  notifications?: { enabled: boolean; times: string[] };
+}
+
+/** v1 category ids that were renamed to match the content pack. */
+const LEGACY_GOAL_MAP: Record<string, CategoryId> = {
+  work: 'work_success',
+  habits: 'healthy_habits',
+  sleep: 'bedtime',
+};
+
+const VALID_GOALS = new Set<string>([
+  'confidence',
+  'motivation',
+  'calm',
+  'self_love',
+  'work_success',
+  'money',
+  'relationships',
+  'healthy_habits',
+]);
+
+/**
+ * Migrate any stored preferences shape to schema v2. v1 users keep their
+ * theme, notification settings and (renamed) goals; the new personalization
+ * fields get the recommended defaults (neutral address, mixed style).
+ * Completed onboarding stays completed — nobody is forced through the new
+ * flow; everything is editable later in Settings.
+ */
+function migratePreferences(stored: unknown): { prefs: Preferences; migrated: boolean } {
+  if (stored == null || typeof stored !== 'object') {
+    return { prefs: DEFAULT_PREFERENCES, migrated: false };
+  }
+  const raw = stored as Partial<Preferences> & LegacyPreferencesV1;
+  if (raw.version === 2 && raw.profile) {
+    return {
+      prefs: {
+        ...DEFAULT_PREFERENCES,
+        ...raw,
+        profile: { ...DEFAULT_PROFILE, ...raw.profile },
+      } as Preferences,
+      migrated: false,
+    };
+  }
+  const legacyGoals = Array.isArray(raw.goals) ? raw.goals : [];
+  const goals = legacyGoals
+    .map((g) => LEGACY_GOAL_MAP[g] ?? (g as CategoryId))
+    .filter((g) => VALID_GOALS.has(g));
+  return {
+    prefs: {
+      version: 2,
+      onboardingCompleted: raw.onboardingCompleted ?? false,
+      profile: { ...DEFAULT_PROFILE, goals },
+      themeId: raw.themeId ?? DEFAULT_THEME_ID,
+      notifications: raw.notifications ?? DEFAULT_PREFERENCES.notifications,
+    },
+    migrated: true,
+  };
+}
 
 export type FavoriteResult = 'added' | 'removed' | 'limit';
 
 interface PreferencesContextValue {
   ready: boolean;
   preferences: Preferences;
+  profile: PersonalizationProfile;
   theme: AppTheme;
   /** Tokens derived from the theme's ink/surface (sub, faint, line, ghost…). */
   tokens: ThemeTokens;
@@ -41,6 +123,9 @@ interface PreferencesContextValue {
   streak: StreakState;
   recentIds: string[];
   updatePreferences(patch: Partial<Preferences>): void;
+  updateProfile(patch: Partial<PersonalizationProfile>): void;
+  /** Dev/testing: clear onboarding + profile so the flow can run again. */
+  resetOnboarding(): void;
   /** Toggles a favorite; returns 'limit' when the free cap is hit. */
   toggleFavorite(id: string): FavoriteResult;
   isFavorite(id: string): boolean;
@@ -62,16 +147,30 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     let cancelled = false;
     (async () => {
       const [storedPrefs, storedFavorites, storedStreak, storedRecent] = await Promise.all([
-        readJson<Preferences>(StorageKeys.preferences, DEFAULT_PREFERENCES),
+        readJson<unknown>(StorageKeys.preferences, null),
         readJson<string[]>(StorageKeys.favorites, []),
         readJson<StreakState>(StorageKeys.streak, EMPTY_STREAK),
         readJson<string[]>(StorageKeys.recentIds, []),
       ]);
       if (cancelled) return;
-      setPreferences({ ...DEFAULT_PREFERENCES, ...storedPrefs });
-      setFavorites(storedFavorites);
-      recentRef.current = storedRecent;
-      setRecentIds(storedRecent);
+
+      const { prefs, migrated } = migratePreferences(storedPrefs);
+      setPreferences(prefs);
+      if (migrated) {
+        void writeJson(StorageKeys.preferences, prefs);
+        // The v1 dev corpus shared id ranges with the new corpus but the
+        // texts differ, so stored favorite/recent ids would point at
+        // different messages. Clearing is the only honest migration.
+        void writeJson(StorageKeys.favorites, []);
+        void writeJson(StorageKeys.recentIds, []);
+        setFavorites([]);
+        recentRef.current = [];
+        setRecentIds([]);
+      } else {
+        setFavorites(storedFavorites);
+        recentRef.current = storedRecent;
+        setRecentIds(storedRecent);
+      }
 
       const nextStreak = registerActiveDay(storedStreak);
       setStreak(nextStreak);
@@ -90,6 +189,30 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
+  }, []);
+
+  const updateProfile = useCallback((patch: Partial<PersonalizationProfile>) => {
+    setPreferences((prev) => {
+      const next = { ...prev, profile: { ...prev.profile, ...patch } };
+      void writeJson(StorageKeys.preferences, next);
+      return next;
+    });
+  }, []);
+
+  const resetOnboarding = useCallback(() => {
+    setPreferences((prev) => {
+      const next: Preferences = {
+        ...prev,
+        onboardingCompleted: false,
+        profile: DEFAULT_PROFILE,
+        notifications: DEFAULT_PREFERENCES.notifications,
+      };
+      void writeJson(StorageKeys.preferences, next);
+      return next;
+    });
+    recentRef.current = [];
+    setRecentIds([]);
+    void writeJson(StorageKeys.recentIds, []);
   }, []);
 
   const toggleFavorite = useCallback(
@@ -132,12 +255,15 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     () => ({
       ready,
       preferences,
+      profile: preferences.profile,
       theme,
       tokens,
       favorites,
       streak,
       recentIds,
       updatePreferences,
+      updateProfile,
+      resetOnboarding,
       toggleFavorite,
       isFavorite,
       markShown,
@@ -151,6 +277,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       streak,
       recentIds,
       updatePreferences,
+      updateProfile,
+      resetOnboarding,
       toggleFavorite,
       isFavorite,
       markShown,

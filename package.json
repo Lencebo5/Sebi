@@ -45,7 +45,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "verify:personalization": "tsc -p tsconfig.test.json && node scripts/verify-personalization.js"
   },
   "private": true
 }

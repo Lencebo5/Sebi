@@ -2,8 +2,8 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 
 import { APP_NAME, NOTIFICATION_HORIZON_DAYS } from '@/constants/appConfig';
-import type { CategoryId, NotificationSettings } from '@/models/types';
-import { randomAffirmation } from '@/services/dailyContent';
+import type { NotificationSettings, PersonalizationProfile } from '@/models/types';
+import { notificationAffirmation } from '@/services/dailyContent';
 import { parseTime } from '@/services/dates';
 
 /**
@@ -45,7 +45,7 @@ export async function requestNotificationPermission(): Promise<boolean> {
 
 export interface ScheduleInput {
   settings: NotificationSettings;
-  goals: CategoryId[];
+  profile: PersonalizationProfile;
   isPremium: boolean;
   /** Plan-dependent cap on times per day. */
   maxPerDay: number;
@@ -57,7 +57,7 @@ export interface ScheduleInput {
  */
 export async function rescheduleNotifications({
   settings,
-  goals,
+  profile,
   isPremium,
   maxPerDay,
 }: ScheduleInput): Promise<void> {
@@ -66,7 +66,9 @@ export async function rescheduleNotifications({
   await Notifications.cancelAllScheduledNotificationsAsync();
   if (!settings.enabled || settings.times.length === 0) return;
 
-  const granted = await requestNotificationPermission();
+  // Never request permission from this background sync — the system prompt
+  // may only appear from an explicit user action (Podešavanja → Podsetnici).
+  const { granted } = await Notifications.getPermissionsAsync();
   if (!granted) return;
 
   const times = settings.times
@@ -76,6 +78,8 @@ export async function rescheduleNotifications({
 
   const now = new Date();
   const scheduled: Promise<string>[] = [];
+  // Track what this batch already used so a week of reminders stays varied.
+  const usedIds: string[] = [];
   for (let day = 0; day < NOTIFICATION_HORIZON_DAYS; day++) {
     for (const time of times) {
       const fireDate = new Date(now);
@@ -83,7 +87,8 @@ export async function rescheduleNotifications({
       fireDate.setHours(time.hour, time.minute, 0, 0);
       if (fireDate.getTime() <= now.getTime() + 60_000) continue;
 
-      const affirmation = randomAffirmation(goals, isPremium);
+      const affirmation = notificationAffirmation(profile, isPremium, fireDate, usedIds);
+      usedIds.push(affirmation.id);
       scheduled.push(
         Notifications.scheduleNotificationAsync({
           content: {

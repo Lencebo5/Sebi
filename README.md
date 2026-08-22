@@ -70,8 +70,15 @@ src/
 - **Besplatne teme**: `premium` flag po temi u `src/theme/themes.ts`
   (Linen, Midnight, Sage i Rose su besplatne); ostali limiti su u
   `FREE_LIMITS` (`src/constants/appConfig.ts`).
-- **Novi sadržaj**: dodaj afirmacije u `src/content/affirmations.ts`
-  (id-jevi su stabilni — ne menjati postojeće).
+- **Sadržaj**: 1.460 lektorisanih poruka u
+  `src/content/sebi_content_personalized_v1_1460.json` (izvor istine iz
+  content pack-a — tekstovi se ne menjaju u kodu). Loader i indeksi su u
+  `src/content/affirmations.ts`; `premium` po poruci se normalizuje na
+  nivo kategorije.
+- **Personalizacija**: profil (godine, ciljevi, izazovi, kontekst, obraćanje,
+  stil) se čuva lokalno; bodovanje i raznovrsnost feed-a su u
+  `src/services/personalization.ts` (pravila: `docs/sebi_personalization_scoring_v1.md`).
+  Provera profila A–D: `npm run verify:personalization`.
 - **Pravne stranice i store linkovi**: `PRIVACY_URL`, `TERMS_URL`,
   `APP_STORE_URL`, `PLAY_STORE_URL` u `appConfig.ts` — zameniti pre objave.
 

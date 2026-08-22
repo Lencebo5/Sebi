@@ -51,7 +51,7 @@ export const CATEGORIES: Category[] = [
     goal: false,
   },
   {
-    id: 'work',
+    id: 'work_success',
     name: 'Posao i uspeh',
     description: 'Fokus, granice i napredak',
     premium: true,
@@ -72,7 +72,7 @@ export const CATEGORIES: Category[] = [
     goal: true,
   },
   {
-    id: 'habits',
+    id: 'healthy_habits',
     name: 'Zdravije navike',
     description: 'Mali koraci koji ostaju',
     premium: false,
@@ -86,7 +86,7 @@ export const CATEGORIES: Category[] = [
     goal: false,
   },
   {
-    id: 'sleep',
+    id: 'bedtime',
     name: 'Pred spavanje',
     description: 'Spusti dan i odmori se',
     premium: true,
@@ -111,20 +111,11 @@ const GOAL_ORDER: CategoryId[] = [
   'motivation',
   'calm',
   'self_love',
-  'work',
+  'work_success',
   'money',
   'relationships',
-  'habits',
+  'healthy_habits',
 ];
 
 /** Categories offered as goals, in design order. */
 export const GOAL_CATEGORIES = GOAL_ORDER.map((id) => getCategory(id)).filter((c) => c.goal);
-
-/** Onboarding "How do you want to feel?" options. */
-export const FEELING_OPTIONS = [
-  { id: 'calmer', label: 'Smirenije' },
-  { id: 'stronger', label: 'Snažnije' },
-  { id: 'motivated', label: 'Motivisanije' },
-  { id: 'grateful', label: 'Zahvalnije' },
-  { id: 'confident', label: 'Sigurnije u sebe' },
-] as const;

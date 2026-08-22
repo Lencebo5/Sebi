@@ -16,7 +16,7 @@ import { useSubscription } from '@/state/SubscriptionContext';
 export default function Viewer() {
   const router = useRouter();
   const { categoryId, start } = useLocalSearchParams<{ categoryId: string; start?: string }>();
-  const { preferences, favorites, recentIds } = usePreferences();
+  const { profile, favorites, recentIds } = usePreferences();
   const { isPremium } = useSubscription();
 
   const feed: Affirmation[] = useMemo(() => {
@@ -27,11 +27,11 @@ export default function Viewer() {
         .reverse();
     }
     if (categoryId === 'today') {
-      return buildTodayFeed(preferences.goals, isPremium, recentIds);
+      return buildTodayFeed(profile, isPremium, recentIds);
     }
     const known = CATEGORIES.some((c) => c.id === categoryId);
     if (!known) return [];
-    return buildCategoryFeed(categoryId as CategoryId, recentIds);
+    return buildCategoryFeed(categoryId as CategoryId, profile, recentIds);
     // Feed is intentionally built once per open — browsing must not reshuffle it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryId]);

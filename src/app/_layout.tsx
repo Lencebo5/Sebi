@@ -66,7 +66,7 @@ function AppShell() {
     if (!ready || !preferences.onboardingCompleted) return;
     void rescheduleNotifications({
       settings: preferences.notifications,
-      goals: preferences.goals,
+      profile: preferences.profile,
       isPremium,
       maxPerDay: isPremium
         ? PREMIUM_LIMITS.notificationsPerDay
@@ -76,7 +76,7 @@ function AppShell() {
     ready,
     preferences.onboardingCompleted,
     preferences.notifications,
-    preferences.goals,
+    preferences.profile,
     isPremium,
   ]);
 

@@ -85,10 +85,10 @@ export const GOAL_ICONS: Partial<Record<CategoryId, IconName>> = {
   motivation: 'trendingUp',
   calm: 'waves',
   self_love: 'heart',
-  work: 'briefcase',
+  work_success: 'briefcase',
   money: 'coin',
   relationships: 'circles',
-  habits: 'leaf',
+  healthy_habits: 'leaf',
 };
 
 export function Icon({

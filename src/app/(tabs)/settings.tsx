@@ -33,7 +33,7 @@ interface Row {
  */
 export default function Settings() {
   const router = useRouter();
-  const { tokens } = usePreferences();
+  const { tokens, resetOnboarding } = usePreferences();
   const { isPremium, restore, adapterName } = useSubscription();
   const { showToast } = useToast();
 
@@ -55,7 +55,7 @@ export default function Settings() {
   };
 
   const rows: Row[] = [
-    { label: 'Moji ciljevi', onPress: () => router.push('/settings/goals') },
+    { label: 'Personalizacija', onPress: () => router.push('/settings/goals') },
     { label: 'Podsetnici', onPress: () => router.push('/settings/reminders') },
     { label: 'Izgled', onPress: () => router.push('/settings/appearance') },
     {
@@ -78,6 +78,17 @@ export default function Settings() {
     { label: 'Uslovi korišćenja', onPress: () => void WebBrowser.openBrowserAsync(TERMS_URL) },
     { label: 'Vrati kupovinu', onPress: () => void handleRestore() },
   ];
+
+  if (__DEV__) {
+    rows.push({
+      label: 'Resetuj onboarding (dev)',
+      gapAbove: true,
+      onPress: () => {
+        resetOnboarding();
+        router.replace('/onboarding');
+      },
+    });
+  }
 
   const version = Constants.expoConfig?.version ?? '1.0.0';
 

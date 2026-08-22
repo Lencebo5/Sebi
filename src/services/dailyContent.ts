@@ -1,63 +1,52 @@
 import { RECENT_HISTORY_SIZE } from '@/constants/appConfig';
 import { AFFIRMATIONS, getAffirmationsByCategory } from '@/content/affirmations';
 import { getCategory } from '@/content/categories';
-import type { Affirmation, CategoryId } from '@/models/types';
+import type { Affirmation, CategoryId, PersonalizationProfile } from '@/models/types';
+import { orderFeed, periodForHour, pickOne } from '@/services/personalization';
 
 /**
- * Content selection: builds feeds that avoid the recently shown
- * affirmations and lean toward the user's onboarding goals.
+ * Feed construction on top of the personalization engine
+ * (services/personalization.ts). Entitlement stays category-level: free
+ * users never receive messages from Premium categories in generated feeds.
  */
 
-/** Pool for the personalized "Za danas" feed. */
-export function getTodayPool(goals: CategoryId[], isPremium: boolean): Affirmation[] {
-  const accessible = AFFIRMATIONS.filter((a) => isPremium || !getCategory(a.category).premium);
-  const goalSet = new Set(goals);
-  const preferred = accessible.filter((a) => goalSet.has(a.category));
-  const rest = accessible.filter((a) => !goalSet.has(a.category));
-  // Weight goals ~2:1 by listing preferred items twice before shuffling,
-  // then de-duplicating in feed order.
-  return [...preferred, ...preferred, ...rest];
-}
-
-/** Deterministic-ish shuffle seeded per session; plain Fisher–Yates. */
-function shuffle<T>(items: T[]): T[] {
-  const result = [...items];
-  for (let i = result.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [result[i], result[j]] = [result[j], result[i]];
-  }
-  return result;
+/** Everything the current plan may show in the personalized feed. */
+function accessiblePool(isPremium: boolean): Affirmation[] {
+  if (isPremium) return AFFIRMATIONS;
+  return AFFIRMATIONS.filter((a) => !getCategory(a.category).premium);
 }
 
 /**
- * Order a pool into a feed: recently shown items go last, duplicates are
- * removed, the rest is shuffled.
+ * "Za danas" — the most personalized feed: goals, current challenges, life
+ * context, delivery style, age affinity, time of day and recent history all
+ * shape the order.
  */
-export function buildFeed(pool: Affirmation[], recentIds: string[]): Affirmation[] {
-  const recent = new Set(recentIds.slice(-RECENT_HISTORY_SIZE));
-  const seen = new Set<string>();
-  const fresh: Affirmation[] = [];
-  const stale: Affirmation[] = [];
-  for (const item of shuffle(pool)) {
-    if (seen.has(item.id)) continue;
-    seen.add(item.id);
-    (recent.has(item.id) ? stale : fresh).push(item);
-  }
-  // Only push recent items to the back when there are enough alternatives.
-  if (fresh.length === 0) return [...stale];
-  return [...fresh, ...stale];
-}
-
-export function buildCategoryFeed(category: CategoryId, recentIds: string[]): Affirmation[] {
-  return buildFeed(getAffirmationsByCategory(category), recentIds);
-}
-
 export function buildTodayFeed(
-  goals: CategoryId[],
+  profile: PersonalizationProfile,
   isPremium: boolean,
   recentIds: string[],
+  now: Date = new Date(),
 ): Affirmation[] {
-  return buildFeed(getTodayPool(goals, isPremium), recentIds);
+  return orderFeed(accessiblePool(isPremium), profile, {
+    period: periodForHour(now.getHours()),
+    recentIds,
+  });
+}
+
+/**
+ * Explicit category feed: the category remains the primary filter, but the
+ * user's personalization still decides what surfaces first within it.
+ */
+export function buildCategoryFeed(
+  category: CategoryId,
+  profile: PersonalizationProfile,
+  recentIds: string[],
+  now: Date = new Date(),
+): Affirmation[] {
+  return orderFeed(getAffirmationsByCategory(category), profile, {
+    period: periodForHour(now.getHours()),
+    recentIds,
+  });
 }
 
 /** Append an id to the recent history, keeping it bounded. */
@@ -67,8 +56,20 @@ export function pushRecent(recentIds: string[], id: string): string[] {
   return next.slice(-RECENT_HISTORY_SIZE);
 }
 
-/** A random accessible affirmation, e.g. for notification bodies. */
-export function randomAffirmation(goals: CategoryId[], isPremium: boolean): Affirmation {
-  const pool = getTodayPool(goals, isPremium);
-  return pool[Math.floor(Math.random() * pool.length)] ?? AFFIRMATIONS[0];
+/**
+ * One personalized affirmation for a scheduled notification. `fireDate`
+ * matters: a 08:00 slot naturally leans toward morning content, a 21:00
+ * slot toward winding down. `exclude` keeps one scheduling batch varied.
+ */
+export function notificationAffirmation(
+  profile: PersonalizationProfile,
+  isPremium: boolean,
+  fireDate: Date,
+  exclude: string[] = [],
+): Affirmation {
+  const picked = pickOne(accessiblePool(isPremium), profile, {
+    period: periodForHour(fireDate.getHours()),
+    exclude,
+  });
+  return picked ?? AFFIRMATIONS[0];
 }

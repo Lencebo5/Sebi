@@ -8,24 +8,41 @@ import { Icon } from '@/components/Icon';
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { GoalChip, SelectableRow } from '@/components/SelectableCard';
 import { ThemedBackground } from '@/components/ThemedBackground';
-import { bumpHour, TimeStepperRow } from '@/components/TimeStepperRow';
 import { useToast } from '@/components/Toast';
-import { getAffirmationsByCategory } from '@/content/affirmations';
-import { FEELING_OPTIONS, GOAL_CATEGORIES } from '@/content/categories';
-import type { CategoryId } from '@/models/types';
+import { GOAL_CATEGORIES } from '@/content/categories';
+import {
+  ADDRESS_MODE_OPTIONS,
+  AGE_OPTIONS,
+  CHALLENGE_OPTIONS,
+  DELIVERY_STYLE_OPTIONS,
+  LIFE_CONTEXT_NONE_LABEL,
+  LIFE_CONTEXT_OPTIONS,
+  MAX_CHALLENGES,
+  MAX_GOALS,
+  MAX_LIFE_CONTEXTS,
+} from '@/content/personalization';
+import type {
+  AddressMode,
+  AgeRange,
+  CategoryId,
+  DeliveryStyle,
+  LifeContext,
+  NeedTag,
+  PersonalizationProfile,
+} from '@/models/types';
 import { track } from '@/services/analytics';
-import { requestNotificationPermission } from '@/services/notifications';
-import { usePreferences } from '@/state/PreferencesContext';
+import { buildTodayFeed } from '@/services/dailyContent';
+import { DEFAULT_PROFILE, usePreferences } from '@/state/PreferencesContext';
 import { fonts, spacing, type } from '@/theme/tokens';
 
-const DEFAULT_TIMES = ['08:00', '14:00', '20:00'];
-const MAX_TIMES = 5;
-const STEPS = 5;
+const STEPS = 7;
 
 /**
- * Five-step onboarding per the design: emotional opener, goal grid,
- * feelings, reminder times with hour steppers, personalized preview.
- * One action per screen; progress dots with a stretched active pill.
+ * Personalization onboarding v2 (docs/SEBI_INTEGRATION_README.md): age →
+ * goals → current challenges → life context → address mode → delivery
+ * style → personalized result. Reminders are deliberately NOT configured
+ * here and no notification permission is requested — that lives in
+ * Podešavanja → Podsetnici.
  */
 export default function Onboarding() {
   const router = useRouter();
@@ -34,58 +51,77 @@ export default function Onboarding() {
   const insets = useSafeAreaInsets();
 
   const [step, setStep] = useState(0);
+  const [ageRange, setAgeRange] = useState<AgeRange | undefined>(undefined);
   const [goals, setGoals] = useState<CategoryId[]>([]);
-  const [feeling, setFeeling] = useState<string>(FEELING_OPTIONS[0].id);
-  const [times, setTimes] = useState<string[]>(DEFAULT_TIMES);
+  const [challenges, setChallenges] = useState<NeedTag[]>([]);
+  const [lifeContexts, setLifeContexts] = useState<LifeContext[]>([]);
+  const [lifeNone, setLifeNone] = useState(false);
+  const [addressMode, setAddressMode] = useState<AddressMode>('neutral');
+  const [deliveryStyle, setDeliveryStyle] = useState<DeliveryStyle | 'mixed'>('mixed');
 
   useMemo(() => track('onboarding_started'), []);
 
-  const previewText = useMemo(() => {
-    const firstGoal = goals[0];
-    if (firstGoal && firstGoal !== 'today') {
-      const pool = getAffirmationsByCategory(firstGoal);
-      if (pool.length > 0) return pool[0].text;
-    }
-    return 'Ne moram danas sve da rešim. Dovoljno je da napravim sledeći korak.';
-  }, [goals]);
+  const draftProfile: PersonalizationProfile = useMemo(
+    () => ({ ageRange, goals, currentChallenges: challenges, lifeContexts, addressMode, deliveryStyle }),
+    [ageRange, goals, challenges, lifeContexts, addressMode, deliveryStyle],
+  );
 
-  const toggleGoal = (id: CategoryId) =>
-    setGoals((g) => (g.includes(id) ? g.filter((v) => v !== id) : [...g, id]));
+  // The personalized first thought — computed once the user reaches the
+  // result step, from the profile they just described.
+  const preview = useMemo(() => {
+    if (step !== STEPS - 1) return null;
+    return buildTodayFeed(draftProfile, false, [])[0] ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
-  const finish = async () => {
-    updatePreferences({
-      onboardingCompleted: true,
-      goals,
-      feelings: [feeling],
-      notifications: { enabled: times.length > 0, times: [...times].sort() },
-    });
-    track('onboarding_completed', { goals });
-    if (times.length > 0) {
-      await requestNotificationPermission();
-      track('notification_enabled', { times: times.length });
+  const toggleCapped = <T,>(list: T[], value: T, max: number, capMessage: string): T[] => {
+    if (list.includes(value)) return list.filter((v) => v !== value);
+    if (list.length >= max) {
+      showToast(capMessage);
+      return list;
     }
+    return [...list, value];
+  };
+
+  const toggleLifeContext = (id: LifeContext) => {
+    setLifeNone(false);
+    setLifeContexts((prev) =>
+      toggleCapped(prev, id, MAX_LIFE_CONTEXTS, 'Najviše 2 odgovora.'),
+    );
+  };
+
+  const selectLifeNone = () => {
+    // "Ništa od ovoga" is exclusive — it clears every real context.
+    setLifeNone((prev) => !prev);
+    setLifeContexts([]);
+  };
+
+  const finish = () => {
+    updatePreferences({ onboardingCompleted: true, profile: draftProfile });
+    track('onboarding_completed', { goals, challenges });
     router.replace('/(tabs)');
   };
 
-  const skip = () => {
-    updatePreferences({
-      onboardingCompleted: true,
-      notifications: { enabled: true, times: DEFAULT_TIMES },
-    });
+  const skipAll = () => {
+    updatePreferences({ onboardingCompleted: true, profile: DEFAULT_PROFILE });
     router.replace('/(tabs)');
   };
 
-  const addTime = () => {
-    if (times.length >= MAX_TIMES) {
-      showToast('Najviše 5 podsetnika dnevno.');
-      return;
-    }
-    setTimes((t) => [...t, '17:00']);
-  };
+  const canContinue =
+    step === 1 ? goals.length >= 1 : step === 2 ? challenges.length >= 1 : true;
 
   const next = () => {
+    if (!canContinue) return;
+    if (step === 0) track('onboarding_age_selected', { ageRange: ageRange ?? 'skipped' });
+    if (step === 1) track('onboarding_goals_selected', { goals });
+    if (step === 2) track('onboarding_challenges_selected', { challenges });
+    if (step === 3) {
+      track('onboarding_life_context_selected', { contexts: lifeNone ? ['none'] : lifeContexts });
+    }
+    if (step === 4) track('onboarding_address_mode_selected', { mode: addressMode });
+    if (step === 5) track('onboarding_style_selected', { style: deliveryStyle });
     if (step < STEPS - 1) setStep(step + 1);
-    else void finish();
+    else finish();
   };
 
   return (
@@ -119,11 +155,7 @@ export default function Onboarding() {
               />
             ))}
           </View>
-          <Pressable
-            accessibilityRole="button"
-            onPress={skip}
-            hitSlop={8}
-            style={styles.skipButton}>
+          <Pressable accessibilityRole="button" onPress={skipAll} hitSlop={8} style={styles.skipButton}>
             <Text style={[styles.skipLabel, { color: tokens.faint }]}>Preskoči</Text>
           </Pressable>
         </View>
@@ -134,22 +166,22 @@ export default function Onboarding() {
           exiting={FadeOut.duration(140)}
           style={styles.stepBody}>
           {step === 0 && (
-            <View style={styles.centerStep}>
-              <Text style={[styles.heroText, { color: tokens.ink }]}>
-                Svaki dan počinje jednom mišlju.
-              </Text>
-              <Text style={[styles.heroSubtitle, { color: tokens.sub }]}>
-                Odvoji nekoliko sekundi za sebe.
-              </Text>
-            </View>
+            <StepList
+              title="Koliko imaš godina?"
+              subtitle="Pomaže nam da biramo poruke bliže periodu života u kom se nalaziš.">
+              {AGE_OPTIONS.map((option) => (
+                <SelectableRow
+                  key={option.id}
+                  label={option.label}
+                  selected={ageRange === option.id}
+                  onPress={() => setAgeRange((prev) => (prev === option.id ? undefined : option.id))}
+                />
+              ))}
+            </StepList>
           )}
 
           {step === 1 && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
-              <Text style={[styles.stepTitle, { color: tokens.ink }]}>Na čemu želiš da radiš?</Text>
-              <Text style={[styles.stepSubtitle, { color: tokens.sub }]}>
-                Izaberi jednu ili više oblasti.
-              </Text>
+            <StepList title="Na čemu želiš da radiš?" subtitle="Izaberi do 3 oblasti koje su ti trenutno najvažnije.">
               <View style={styles.goalGrid}>
                 {GOAL_CATEGORIES.map((category) => (
                   <View key={category.id} style={styles.goalCell}>
@@ -157,68 +189,132 @@ export default function Onboarding() {
                       categoryId={category.id}
                       label={category.goalName ?? category.name}
                       selected={goals.includes(category.id)}
-                      onPress={() => toggleGoal(category.id)}
+                      onPress={() =>
+                        setGoals((prev) =>
+                          toggleCapped(prev, category.id, MAX_GOALS, 'Najviše 3 oblasti.'),
+                        )
+                      }
                     />
                   </View>
                 ))}
               </View>
-            </ScrollView>
+            </StepList>
           )}
 
           {step === 2 && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
-              <Text style={[styles.stepTitle, { color: tokens.ink, marginBottom: spacing.lg }]}>
-                Kako želiš da se osećaš?
-              </Text>
-              {FEELING_OPTIONS.map((option) => (
+            <StepList
+              title="Šta ti je ovih dana najteže?"
+              subtitle="Izaberi najviše 2 stvari. Ovo možeš kasnije da promeniš.">
+              {CHALLENGE_OPTIONS.map((option) => (
                 <SelectableRow
                   key={option.id}
+                  multi
                   label={option.label}
-                  selected={feeling === option.id}
-                  onPress={() => setFeeling(option.id)}
+                  description={option.description}
+                  selected={challenges.includes(option.id)}
+                  onPress={() =>
+                    setChallenges((prev) =>
+                      toggleCapped(prev, option.id, MAX_CHALLENGES, 'Najviše 2 stvari.'),
+                    )
+                  }
                 />
               ))}
-            </ScrollView>
+            </StepList>
           )}
 
           {step === 3 && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
-              <Text style={[styles.stepTitle, { color: tokens.ink }]}>
-                Mala poruka u pravom trenutku.
-              </Text>
-              <Text style={[styles.stepSubtitle, { color: tokens.sub }]}>
-                Podsetnici tokom dana. Menjaš ih kasnije u Podešavanjima.
-              </Text>
-              {times.map((time, i) => (
-                <TimeStepperRow
-                  key={i}
-                  time={time}
-                  bordered
-                  onDecrement={() => setTimes((t) => t.map((v, j) => (j === i ? bumpHour(v, -1) : v)))}
-                  onIncrement={() => setTimes((t) => t.map((v, j) => (j === i ? bumpHour(v, 1) : v)))}
+            <StepList
+              title="Šta trenutno najbolje opisuje tvoj život?"
+              subtitle="Možeš da izabereš do 2 odgovora.">
+              {LIFE_CONTEXT_OPTIONS.map((option) => (
+                <SelectableRow
+                  key={option.id}
+                  multi
+                  label={option.label}
+                  selected={lifeContexts.includes(option.id)}
+                  onPress={() => toggleLifeContext(option.id)}
                 />
               ))}
-              <Pressable
-                accessibilityRole="button"
-                onPress={addTime}
-                style={styles.addTimeRow}>
-                <Icon name="plus" size={14} color={tokens.sub} strokeWidth={2} />
-                <Text style={[styles.addTimeLabel, { color: tokens.sub }]}>Dodaj vreme</Text>
-              </Pressable>
-            </ScrollView>
+              <SelectableRow multi label={LIFE_CONTEXT_NONE_LABEL} selected={lifeNone} onPress={selectLifeNone} />
+            </StepList>
           )}
 
           {step === 4 && (
-            <View style={styles.centerStep}>
-              <Text style={[styles.previewLabel, { color: tokens.sub }]}>TVOJA PRVA MISAO</Text>
-              <Text style={[styles.previewText, { color: tokens.ink }]}>{previewText}</Text>
+            <StepList
+              title="Kako želiš da ti se Sebi obraća?"
+              subtitle="Većina poruka je neutralna. Ovo nam omogućava i ličnije formulacije.">
+              {ADDRESS_MODE_OPTIONS.map((option) => (
+                <SelectableRow
+                  key={option.id}
+                  label={option.label}
+                  description={option.description}
+                  selected={addressMode === option.id}
+                  onPress={() => setAddressMode(option.id)}
+                />
+              ))}
+            </StepList>
+          )}
+
+          {step === 5 && (
+            <StepList
+              title="Kako želiš da Sebi razgovara sa tobom?"
+              subtitle="Izaberi stil koji ti najviše prija.">
+              {DELIVERY_STYLE_OPTIONS.map((option) => (
+                <SelectableRow
+                  key={option.id}
+                  label={option.label}
+                  description={option.description}
+                  selected={deliveryStyle === option.id}
+                  onPress={() => setDeliveryStyle(option.id)}
+                />
+              ))}
+            </StepList>
+          )}
+
+          {step === 6 && (
+            <View style={styles.resultStep}>
+              <Text style={[styles.resultTitle, { color: tokens.ink }]}>Sve je spremno.</Text>
+              <Text style={[styles.resultSubtitle, { color: tokens.sub }]}>
+                Sebi će birati poruke prema onome što ti je trenutno važno.
+              </Text>
+              {preview && (
+                <View style={styles.previewBlock}>
+                  <Text style={[styles.previewLabel, { color: tokens.sub }]}>TVOJA PRVA MISAO</Text>
+                  <Text style={[styles.previewText, { color: tokens.ink }]}>{preview.text}</Text>
+                </View>
+              )}
             </View>
           )}
         </Animated.View>
 
-        <PrimaryButton label={step === STEPS - 1 ? 'Počni' : 'Nastavi'} onPress={next} />
+        <PrimaryButton
+          label={step === STEPS - 1 ? 'Počni' : 'Nastavi'}
+          onPress={next}
+          disabled={!canContinue}
+        />
       </View>
     </ThemedBackground>
+  );
+}
+
+function StepList({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const { tokens } = usePreferences();
+  return (
+    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.listStep}>
+      <Text style={[styles.stepTitle, { color: tokens.ink }]}>{title}</Text>
+      {subtitle ? (
+        <Text style={[styles.stepSubtitle, { color: tokens.sub }]}>{subtitle}</Text>
+      ) : null}
+      {children}
+    </ScrollView>
   );
 }
 
@@ -260,26 +356,8 @@ const styles = StyleSheet.create({
   stepBody: {
     flex: 1,
   },
-  centerStep: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.sm,
-  },
-  heroText: {
-    fontFamily: fonts.serif,
-    fontSize: 31,
-    lineHeight: 42,
-    textAlign: 'center',
-  },
-  heroSubtitle: {
-    fontFamily: fonts.sans,
-    fontSize: 15,
-    textAlign: 'center',
-  },
   listStep: {
-    paddingTop: spacing.xl + 2,
+    paddingTop: spacing.lg,
     paddingBottom: spacing.lg,
   },
   stepTitle: {
@@ -291,6 +369,7 @@ const styles = StyleSheet.create({
   stepSubtitle: {
     fontFamily: fonts.sans,
     fontSize: 13.5,
+    lineHeight: 19,
     marginBottom: spacing.lg,
   },
   goalGrid: {
@@ -302,25 +381,39 @@ const styles = StyleSheet.create({
     flexBasis: '48%',
     flexGrow: 1,
   },
-  addTimeRow: {
-    flexDirection: 'row',
+  resultStep: {
+    flex: 1,
     alignItems: 'center',
-    gap: spacing.sm,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.xs,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.sm,
   },
-  addTimeLabel: {
-    fontFamily: fonts.sansMedium,
+  resultTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 28,
+    lineHeight: 37,
+    textAlign: 'center',
+  },
+  resultSubtitle: {
+    fontFamily: fonts.sans,
     fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: spacing.sm,
+    maxWidth: 300,
+  },
+  previewBlock: {
+    alignItems: 'center',
+    marginTop: spacing.xl + 8,
+    gap: spacing.md,
   },
   previewLabel: {
     ...type.eyebrow,
   },
   previewText: {
     fontFamily: fonts.serif,
-    fontSize: 28,
-    lineHeight: 40,
+    fontSize: 26,
+    lineHeight: 38,
     textAlign: 'center',
-    maxWidth: 320,
+    maxWidth: 330,
   },
 });

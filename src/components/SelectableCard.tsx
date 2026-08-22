@@ -48,23 +48,28 @@ export function GoalChip({
 }
 
 /**
- * Single-choice row (onboarding "Kako želiš da se osećaš?"): quiet outline,
- * ghost fill and a check mark when selected.
+ * Selectable row for onboarding/settings choices: quiet outline, ghost fill
+ * and a check mark when selected; optional secondary description line.
  */
 export function SelectableRow({
   label,
+  description,
   selected,
   onPress,
+  multi = false,
 }: {
   label: string;
+  description?: string;
   selected: boolean;
   onPress: () => void;
+  /** Checkbox semantics for multi-select lists (default: radio). */
+  multi?: boolean;
 }) {
   const { tokens } = usePreferences();
   return (
     <Pressable
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
+      accessibilityRole={multi ? 'checkbox' : 'radio'}
+      accessibilityState={multi ? { checked: selected } : { selected }}
       onPress={onPress}
       style={[
         styles.row,
@@ -73,7 +78,12 @@ export function SelectableRow({
           backgroundColor: selected ? tokens.ghost : 'transparent',
         },
       ]}>
-      <Text style={[styles.rowLabel, { color: tokens.ink }]}>{label}</Text>
+      <View style={styles.rowText}>
+        <Text style={[styles.rowLabel, { color: tokens.ink }]}>{label}</Text>
+        {description ? (
+          <Text style={[styles.rowDescription, { color: tokens.sub }]}>{description}</Text>
+        ) : null}
+      </View>
       <View style={{ opacity: selected ? 1 : 0 }}>
         <Icon name="check" size={16} color={tokens.ink} strokeWidth={2.2} />
       </View>
@@ -105,14 +115,26 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 15,
+    gap: spacing.smd,
+    paddingVertical: 13,
     paddingHorizontal: 18,
     borderRadius: radius.card,
     borderWidth: 1,
+    minHeight: 52,
     marginBottom: spacing.sm + 2,
+  },
+  rowText: {
+    flex: 1,
   },
   rowLabel: {
     fontFamily: fonts.sansMedium,
     fontSize: 15.5,
+    lineHeight: 21,
+  },
+  rowDescription: {
+    fontFamily: fonts.sans,
+    fontSize: 12.5,
+    lineHeight: 17,
+    marginTop: 2,
   },
 });

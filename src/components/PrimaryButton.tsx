@@ -14,6 +14,7 @@ export function PrimaryButton({
   variant = 'solid',
   loading = false,
   loadingLabel,
+  disabled = false,
   style,
 }: {
   label: string;
@@ -22,6 +23,7 @@ export function PrimaryButton({
   loading?: boolean;
   /** Optional label shown next to the spinner (e.g. "Obrada…"). */
   loadingLabel?: string;
+  disabled?: boolean;
   style?: ViewStyle;
 }) {
   const { tokens } = usePreferences();
@@ -31,13 +33,15 @@ export function PrimaryButton({
   return (
     <Pressable
       accessibilityRole="button"
-      onPress={loading ? undefined : onPress}
+      accessibilityState={{ disabled }}
+      onPress={loading || disabled ? undefined : onPress}
       style={({ pressed }) => [
         styles.base,
         solid
           ? { backgroundColor: tokens.ctaBg }
           : { borderWidth: 1, borderColor: tokens.outline },
-        pressed && { transform: [{ scale: 0.985 }] },
+        disabled && { opacity: 0.4 },
+        pressed && !disabled && { transform: [{ scale: 0.985 }] },
         style,
       ]}>
       {loading && <ActivityIndicator size="small" color={textColor} />}

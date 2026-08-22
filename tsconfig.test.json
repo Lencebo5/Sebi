@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": ".test-build",
+    "rootDir": "src",
+    "module": "commonjs",
+    "target": "es2020"
+  },
+  "include": ["src/services/personalization.ts", "src/models/types.ts"]
+}
