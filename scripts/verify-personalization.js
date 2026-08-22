@@ -2,7 +2,7 @@
  * Runs the REAL compiled scoring module against the REAL corpus with a
  * seeded RNG, then checks distribution + diversity expectations. */
 const { orderFeed } = require("../.test-build/services/personalization.js");
-const corpus = require("../src/content/sebi_content_personalized_v1_1460.json");
+const corpus = require("../src/content/sebi_content_FINAL_v2_1609.json");
 
 const PREMIUM_CATEGORIES = new Set(['work_success', 'money', 'relationships', 'hard_days', 'bedtime']);
 const ITEMS = corpus.items.map((i) => ({ ...i, premium: PREMIUM_CATEGORIES.has(i.category) }));
@@ -40,6 +40,25 @@ const check = (label, ok, detail) => {
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}${detail ? ` — ${detail}` : ''}`);
   if (!ok) failures++;
 };
+
+// ── Corpus integrity (final v2, 1,609 messages) ──────────────────────────
+console.log('CORPUS INTEGRITY');
+const VALID_CATEGORIES = new Set(['confidence', 'motivation', 'calm', 'self_love', 'hard_days', 'healthy_habits', 'relationships', 'work_success', 'money', 'gratitude', 'bedtime', 'morning']);
+const VALID_NEED_TAGS = new Set(['worry_overthinking', 'focus_attention', 'emotional_overwhelm', 'low_energy_motivation', 'self_criticism', 'loneliness_disconnection', 'stress_overload', 'difficult_period']);
+check('corpus count = 1609', ITEMS.length === 1609, `${ITEMS.length}`);
+check('all ids unique', new Set(ITEMS.map((a) => a.id)).size === ITEMS.length);
+check('all texts unique', new Set(ITEMS.map((a) => a.text)).size === ITEMS.length);
+check('all categories valid', ITEMS.every((a) => VALID_CATEGORIES.has(a.category)));
+check('all personalization objects valid', ITEMS.every((a) => {
+  const p = a.personalization;
+  return p && Array.isArray(p.needTags) && p.needTags.every((t) => VALID_NEED_TAGS.has(t)) &&
+    Array.isArray(p.lifeContextAffinity) && Array.isArray(p.ageAffinity) &&
+    Array.isArray(p.deliveryStyles) && typeof p.emotionalIntensity === 'string' &&
+    Array.isArray(p.addressModes) && typeof p.primaryGoalEligible === 'boolean';
+}));
+const targetedIds = ITEMS.filter((a) => a.id.startsWith('targeted_v2_'));
+check('targeted_v2 messages loaded (300)', targetedIds.length === 300, `${targetedIds.length}`);
+const allIds = new Set(ITEMS.map((a) => a.id));
 
 for (const [name, { profile, expect }] of Object.entries(PROFILES)) {
   const rng = mulberry32(42);
@@ -95,6 +114,7 @@ for (const [name, { profile, expect }] of Object.entries(PROFILES)) {
     ids.add(a.id);
   }
   check('no duplicate ids in 150 selections', dupes === 0, `${dupes}`);
+  check('feed returns only existing corpus ids', feed.every((a) => allIds.has(a.id)));
   check('no same subcategory back-to-back (150)', seq.every((a, i, arr) => i === 0 || arr[i - 1].subcategory !== a.subcategory));
   check('no category run of 4+ (150)', (() => {
     for (let i = 3; i < seq.length; i++) if ([0, 1, 2, 3].every((k) => seq[i - k].category === seq[i].category)) return false;
@@ -132,6 +152,16 @@ const bCount = nightFeed.slice(0, 40).filter((a) => a.category === 'bedtime').le
 const mCountAtNight = nightFeed.slice(0, 40).filter((a) => a.category === 'morning').length;
 check('morning content likelier in the morning', mCount > mCountAtNight, `morning:${mCount} vs night:${mCountAtNight}`);
 check('bedtime content present at night', bCount > 0, `${bCount}`);
+
+// ── Targeted v2 content surfaces naturally for its intended segment ──────
+const profileT = { ageRange: '18_24', goals: ['confidence', 'motivation'], currentChallenges: ['focus_attention', 'worry_overthinking'], lifeContexts: ['student_early_career'], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const tFeed = orderFeed(ITEMS, profileT, { period: 'day', recentIds: [], rng: mulberry32(11) });
+const tSeq = tFeed.slice(0, 150);
+const tHits = tSeq.filter((a) => a.id.startsWith('targeted_v2_'));
+console.log(`\nPROFILE T (18-24 student) — targeted_v2 in 150 selections: ${tHits.length} (e.g. ${tHits.slice(0, 3).map((a) => a.id).join(', ')})`);
+check('targeted_v2 content appears naturally (18-24 student profile)', tHits.length >= 5, `${tHits.length}`);
+const tCatFeed = orderFeed(ITEMS.filter((a) => a.category === 'confidence'), profileT, { period: 'day', recentIds: [], rng: mulberry32(12) });
+check('category feed stays inside its category', tCatFeed.every((a) => a.category === 'confidence'), `${tCatFeed.length} items`);
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECKS FAILED'}`);
 process.exit(failures === 0 ? 0 : 1);

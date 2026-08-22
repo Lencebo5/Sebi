@@ -1,12 +1,11 @@
-import corpus from '@/content/sebi_content_personalized_v1_1460.json';
+import corpus from '@/content/sebi_content_FINAL_v2_1609.json';
 import { getCategory } from '@/content/categories';
 import type { Affirmation, CategoryId, ContentCategoryId } from '@/models/types';
 
 /**
- * The approved editorial corpus: 1,460 original Serbian Latin messages with
- * personalization metadata (`sebi_content_personalized_v1_1460.json`, the
- * source of truth from the content pack — never edited by hand or at
- * runtime).
+ * The approved editorial corpus: 1,609 original Serbian Latin messages with
+ * personalization metadata (`sebi_content_FINAL_v2_1609.json` — the
+ * authoritative final content source; never edited by hand or at runtime).
  *
  * The JSON is parsed and indexed exactly once at module load. The only
  * normalization applied is the `premium` flag: entitlement in this app is
@@ -14,6 +13,13 @@ import type { Affirmation, CategoryId, ContentCategoryId } from '@/models/types'
  * deliberately overridden — otherwise the dataset would silently reshuffle
  * what is free and what is Premium.
  */
+
+/**
+ * Bumped whenever a corpus revision reuses ids with different texts.
+ * PreferencesContext clears id-based favorites/recents when the persisted
+ * value differs — a favorite must never silently change its wording.
+ */
+export const CONTENT_SCHEMA_VERSION = 2;
 
 interface CorpusFile {
   version: string;

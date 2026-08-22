@@ -81,6 +81,13 @@ export interface Affirmation {
   /** Editorial pipeline stage of the source message. */
   status: string;
   editorialFlags?: string[];
+  /** v2 audit verdict for messages carried over from the v1 corpus. */
+  editorialStatus?: string;
+  /** Segment a targeted v2 message was written for (metadata only —
+   * selection happens exclusively through the scoring signals). */
+  targetSegment?: string;
+  /** Editorial provenance, when present. */
+  source?: string;
   personalization: AffirmationPersonalization;
 }
 

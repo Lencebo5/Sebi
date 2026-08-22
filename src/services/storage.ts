@@ -10,6 +10,8 @@ export const StorageKeys = {
   streak: 'danas.streak.v1',
   recentIds: 'danas.recent-ids.v1',
   mockPremium: 'danas.mock-premium.v1',
+  /** CONTENT_SCHEMA_VERSION the stored favorites/recents were written for. */
+  contentVersion: 'danas.content-version.v1',
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

@@ -9,6 +9,7 @@ import React, {
 } from 'react';
 
 import { FREE_LIMITS } from '@/constants/appConfig';
+import { CONTENT_SCHEMA_VERSION } from '@/content/affirmations';
 import type {
   CategoryId,
   PersonalizationProfile,
@@ -146,21 +147,31 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [storedPrefs, storedFavorites, storedStreak, storedRecent] = await Promise.all([
-        readJson<unknown>(StorageKeys.preferences, null),
-        readJson<string[]>(StorageKeys.favorites, []),
-        readJson<StreakState>(StorageKeys.streak, EMPTY_STREAK),
-        readJson<string[]>(StorageKeys.recentIds, []),
-      ]);
+      const [storedPrefs, storedFavorites, storedStreak, storedRecent, storedContentVersion] =
+        await Promise.all([
+          readJson<unknown>(StorageKeys.preferences, null),
+          readJson<string[]>(StorageKeys.favorites, []),
+          readJson<StreakState>(StorageKeys.streak, EMPTY_STREAK),
+          readJson<string[]>(StorageKeys.recentIds, []),
+          readJson<number>(StorageKeys.contentVersion, 0),
+        ]);
       if (cancelled) return;
 
       const { prefs, migrated } = migratePreferences(storedPrefs);
       setPreferences(prefs);
-      if (migrated) {
-        void writeJson(StorageKeys.preferences, prefs);
-        // The v1 dev corpus shared id ranges with the new corpus but the
-        // texts differ, so stored favorite/recent ids would point at
-        // different messages. Clearing is the only honest migration.
+      if (migrated) void writeJson(StorageKeys.preferences, prefs);
+
+      // Content-version migration: corpus revisions reuse ids with changed
+      // texts (v2 rewrote 827 retained messages), and favorites/recents are
+      // stored by id only — no text snapshot exists to preserve. Keeping
+      // them would silently swap the wording of a user's saved thoughts, so
+      // clearing on version change is the least destructive SAFE option.
+      // Fresh installs (version 0, nothing stored) just adopt the current
+      // version. Preferences, streak and theme are untouched.
+      const contentStale =
+        storedContentVersion !== CONTENT_SCHEMA_VERSION &&
+        (storedFavorites.length > 0 || storedRecent.length > 0);
+      if (migrated || contentStale) {
         void writeJson(StorageKeys.favorites, []);
         void writeJson(StorageKeys.recentIds, []);
         setFavorites([]);
@@ -170,6 +181,9 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         setFavorites(storedFavorites);
         recentRef.current = storedRecent;
         setRecentIds(storedRecent);
+      }
+      if (storedContentVersion !== CONTENT_SCHEMA_VERSION) {
+        void writeJson(StorageKeys.contentVersion, CONTENT_SCHEMA_VERSION);
       }
 
       const nextStreak = registerActiveDay(storedStreak);
