@@ -1,4 +1,4 @@
-import * as Notifications from 'expo-notifications';
+import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { APP_NAME, NOTIFICATION_HORIZON_DAYS } from '@/constants/appConfig';
@@ -13,29 +13,49 @@ import { parseTime } from '@/services/dates';
  * pre-schedule concrete date triggers for the next NOTIFICATION_HORIZON_DAYS
  * days, each with a different affirmation, and rebuild the schedule on every
  * app open and settings change.
+ *
+ * `expo-notifications` is loaded lazily and skipped entirely in Expo Go:
+ * since SDK 53 merely importing the package there throws (its push-token
+ * auto-registration side effect), even though this app only uses LOCAL
+ * notifications. In Expo Go the service is a silent no-op; development and
+ * EAS builds get the full behavior.
  */
 
+const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
+
+type NotificationsModule = typeof import('expo-notifications');
+
+async function native(): Promise<NotificationsModule | null> {
+  if (Platform.OS === 'web' || isExpoGo) return null;
+  return import('expo-notifications');
+}
+
 export function configureNotificationHandling() {
-  if (Platform.OS === 'web') return;
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldPlaySound: false,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
-  });
+  void (async () => {
+    const Notifications = await native();
+    if (!Notifications) return;
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldPlaySound: false,
+        shouldSetBadge: false,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
+  })();
 }
 
 /** Whether the user has hard-denied notifications in system settings. */
 export async function isNotificationPermissionDenied(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  const Notifications = await native();
+  if (!Notifications) return false;
   const current = await Notifications.getPermissionsAsync();
   return !current.granted && !current.canAskAgain;
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {
-  if (Platform.OS === 'web') return false;
+  const Notifications = await native();
+  if (!Notifications) return false;
   const current = await Notifications.getPermissionsAsync();
   if (current.granted) return true;
   if (!current.canAskAgain) return false;
@@ -61,7 +81,8 @@ export async function rescheduleNotifications({
   isPremium,
   maxPerDay,
 }: ScheduleInput): Promise<void> {
-  if (Platform.OS === 'web') return;
+  const Notifications = await native();
+  if (!Notifications) return;
 
   await Notifications.cancelAllScheduledNotificationsAsync();
   if (!settings.enabled || settings.times.length === 0) return;
