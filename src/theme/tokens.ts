@@ -104,15 +104,26 @@ export interface ThemeTokens {
   ctaFg: string;
 }
 
-/** Derive the full token set from a theme's three anchor colors. */
+/**
+ * Derive the full token set from a theme's three anchor colors.
+ *
+ * Dark themes use higher alphas than light ones: the 55/38/13/6 ramp was
+ * calibrated on the light Linen background, and on real OLED panels the
+ * same light-ink alphas over a near-black background drop below comfortable
+ * readability (secondary text and hairlines all but vanish). The dark ramp
+ * keeps every tier clearly visible while staying quiet.
+ */
 export function tokensFor(theme: AppTheme): ThemeTokens {
+  const a = theme.dark
+    ? { sub: 0.62, faint: 0.46, line: 0.2, ghost: 0.09, outline: 0.35 }
+    : { sub: 0.55, faint: 0.38, line: 0.13, ghost: 0.06, outline: 0.28 };
   return {
     ink: theme.ink,
-    sub: withAlpha(theme.ink, 0.55),
-    faint: withAlpha(theme.ink, 0.38),
-    line: withAlpha(theme.ink, 0.13),
-    ghost: withAlpha(theme.ink, 0.06),
-    outline: withAlpha(theme.ink, 0.28),
+    sub: withAlpha(theme.ink, a.sub),
+    faint: withAlpha(theme.ink, a.faint),
+    line: withAlpha(theme.ink, a.line),
+    ghost: withAlpha(theme.ink, a.ghost),
+    outline: withAlpha(theme.ink, a.outline),
     surface: theme.a,
     barBg: withAlpha(theme.a, 0.72),
     ctaBg: theme.ink,

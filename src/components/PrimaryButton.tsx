@@ -40,7 +40,9 @@ export function PrimaryButton({
         solid
           ? { backgroundColor: tokens.ctaBg }
           : { borderWidth: 1, borderColor: tokens.outline },
-        disabled && { opacity: 0.4 },
+        // Muted but clearly present — the screen must never read as
+        // disabled just because nothing is selected yet.
+        disabled && { opacity: 0.55 },
         pressed && !disabled && { transform: [{ scale: 0.985 }] },
         style,
       ]}>
