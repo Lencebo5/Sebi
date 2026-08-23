@@ -1,7 +1,7 @@
 /* Profile A–D verification for the personalization engine (see task spec).
  * Runs the REAL compiled scoring module against the REAL corpus with a
  * seeded RNG, then checks distribution + diversity expectations. */
-const { orderFeed } = require("../.test-build/services/personalization.js");
+const { orderFeed, baseScore, SIGNAL_WEIGHTS, SYNERGY_WEIGHTS } = require("../.test-build/services/personalization.js");
 const corpus = require("../src/content/sebi_content_FINAL_v2_1609.json");
 
 const PREMIUM_CATEGORIES = new Set(['work_success', 'money', 'relationships', 'hard_days', 'bedtime']);
@@ -145,8 +145,13 @@ const positions = recent.map((id) => recFeed.findIndex((a) => a.id === id));
 check('recent 20 pushed out of the first 200', positions.every((p) => p > 200), `min pos ${Math.min(...positions)}`);
 
 // Time of day: morning boosts morning content, evening boosts bedtime.
-const morningFeed = orderFeed(ITEMS, PROFILES.D.profile, { period: 'morning', recentIds: [], rng: mulberry32(3) });
-const nightFeed = orderFeed(ITEMS, PROFILES.D.profile, { period: 'night', recentIds: [], rng: mulberry32(3) });
+// Measured on a NEUTRAL profile: for strongly personalized profiles (like
+// D with difficult_period) matched personal content may legitimately
+// outrank the generic time-of-day boost — that is intended engine behavior
+// (same precedent as the widget time-of-day checks below).
+const todNeutral = { goals: [], currentChallenges: [], lifeContexts: [], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const morningFeed = orderFeed(ITEMS, todNeutral, { period: 'morning', recentIds: [], rng: mulberry32(3) });
+const nightFeed = orderFeed(ITEMS, todNeutral, { period: 'night', recentIds: [], rng: mulberry32(3) });
 const mCount = morningFeed.slice(0, 40).filter((a) => a.category === 'morning').length;
 const bCount = nightFeed.slice(0, 40).filter((a) => a.category === 'bedtime').length;
 const mCountAtNight = nightFeed.slice(0, 40).filter((a) => a.category === 'morning').length;
@@ -162,6 +167,55 @@ console.log(`\nPROFILE T (18-24 student) — targeted_v2 in 150 selections: ${tH
 check('targeted_v2 content appears naturally (18-24 student profile)', tHits.length >= 5, `${tHits.length}`);
 const tCatFeed = orderFeed(ITEMS.filter((a) => a.category === 'confidence'), profileT, { period: 'day', recentIds: [], rng: mulberry32(12) });
 check('category feed stays inside its category', tCatFeed.every((a) => a.category === 'confidence'), `${tCatFeed.length} items`);
+
+// ── Multi-signal synergy + guardrails (v2 scoring audit) ─────────────────
+console.log('\nSYNERGY + GUARDRAILS');
+check('synergy weights are general and positive',
+  SYNERGY_WEIGHTS.goalChallenge > 0 && SYNERGY_WEIGHTS.goalContext > 0 &&
+  SYNERGY_WEIGHTS.challengeContext > 0 && SYNERGY_WEIGHTS.allThree > 0 &&
+  SYNERGY_WEIGHTS.goalChallenge >= SYNERGY_WEIGHTS.goalContext);
+check('goal never ranks below a generic single challenge tag',
+  SIGNAL_WEIGHTS.goal >= SIGNAL_WEIGHTS.challengePerTag - 1);
+
+// General ordering property: a message matching ALL THREE selected signal
+// types must base-outscore every message matching ONLY the challenge tag —
+// for any profile shape, no combination special-cased.
+const synergyProfiles = [
+  { goals: ['work_success'], currentChallenges: ['self_criticism'], lifeContexts: ['career_business'] },
+  { goals: ['confidence'], currentChallenges: ['worry_overthinking'], lifeContexts: ['student_early_career'] },
+  { goals: ['relationships'], currentChallenges: ['emotional_overwhelm'], lifeContexts: ['family_children'] },
+].map((p) => ({ ...p, addressMode: 'neutral', deliveryStyle: 'mixed' }));
+for (const profile of synergyProfiles) {
+  const [g] = profile.goals; const [t] = profile.currentChallenges; const [x] = profile.lifeContexts;
+  const ctx = { profile, period: 'day' };
+  const triple = ITEMS.filter((a) => a.category === g && a.personalization.needTags.includes(t) && a.personalization.lifeContextAffinity.includes(x));
+  const challengeOnly = ITEMS.filter((a) => a.category !== g && a.personalization.needTags.includes(t) && !a.personalization.lifeContextAffinity.includes(x) && a.personalization.needTags.length === 1);
+  const minTriple = Math.min(...triple.map((a) => baseScore(a, ctx)));
+  const maxSingle = Math.max(...challengeOnly.map((a) => baseScore(a, ctx)));
+  check(`triple intersection outranks generic challenge-only (${g})`, triple.length > 0 && minTriple > maxSingle, `${minTriple} vs ${maxSingle}`);
+}
+
+// Concentration ceiling: even for strong-safety profiles the early feed
+// must respect the category-run cap (~75%) — no wall-to-wall category.
+const stressProfiles = [
+  { goals: ['money'], currentChallenges: ['difficult_period'], lifeContexts: ['career_business'] },
+  { goals: ['calm'], currentChallenges: ['worry_overthinking'], lifeContexts: ['family_children'] },
+  { goals: ['work_success'], currentChallenges: ['self_criticism'], lifeContexts: ['career_business'] },
+].map((p) => ({ ...p, addressMode: 'neutral', deliveryStyle: 'mixed' }));
+for (const profile of stressProfiles) {
+  const first60 = orderFeed(ITEMS, profile, { period: 'day', recentIds: [], personalizedCount: 60, rng: mulberry32(21) }).slice(0, 60);
+  const catCounts = {};
+  for (const a of first60) catCounts[a.category] = (catCounts[a.category] || 0) + 1;
+  const maxShare = Math.max(...Object.values(catCounts)) / first60.length;
+  check(`no pathological concentration (${profile.goals[0]}+${profile.currentChallenges[0]})`, maxShare <= 0.76, `${(maxShare * 100).toFixed(0)}%`);
+}
+
+// Goal visibility floor: a chosen goal stays perceptible in the early feed
+// even when its goal×challenge metadata intersection is EMPTY.
+const emptyIntersection = { goals: ['confidence'], currentChallenges: ['focus_attention'], lifeContexts: ['relationship'], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const eiFirst60 = orderFeed(ITEMS, emptyIntersection, { period: 'day', recentIds: [], personalizedCount: 60, rng: mulberry32(23) }).slice(0, 60);
+const eiGoalShare = eiFirst60.filter((a) => a.category === 'confidence').length / eiFirst60.length;
+check('goal visible even with empty goal×challenge metadata', eiGoalShare >= 0.15, `${(eiGoalShare * 100).toFixed(0)}%`);
 
 
 // ── Android widget selection (src/widgets/widget-select.ts) ──────────────

@@ -32,13 +32,47 @@ export interface ScoringContext {
 }
 
 // ── Signal weights (scoring doc §Suggested score) ──
-const GOAL_BOOST = 7;
-const CHALLENGE_BOOST = 8; // per matching needTag — strongest signal
-const LIFE_CONTEXT_BOOST = 3;
+// Exported as one object so the global audit (scripts/
+// audit-personalization.js) can sweep candidates; production treats it as
+// const. `goal: 8` (originally 7) is the one individual-weight change from
+// the v2 synergy audit: at 7, a profile whose goal×challenge metadata
+// intersection is EMPTY had the chosen goal rank strictly below every
+// generic challenge-tagged message, making the selected goal invisible in
+// the early feed (measured 0% in the first 60 picks for such profiles).
+// A tie at 8 lets goal content interleave while challenges stay the
+// strongest signal overall (they stack per tag and cover more corpus).
+export const SIGNAL_WEIGHTS = {
+  goal: 8,
+  challengePerTag: 8, // per matching needTag — strongest signal
+  lifeContext: 3,
+};
 const AGE_BOOST = 2; // deliberately small; age is never a filter
 const STYLE_BOOST = 3;
 const TIME_OF_DAY_BOOST = 3;
 const CONTEXTUAL_CATEGORY_BOOST = 2;
+
+/**
+ * ── Multi-signal synergy ──
+ * Purely additive weights reward a strong single signal as much as a
+ * message sitting at the intersection of several independently selected
+ * signals. These GENERAL bonuses apply whenever one message matches two or
+ * three distinct signal TYPES (goal category / challenge needTag / life
+ * context) — no category combination is ever special-cased, so the same
+ * rule serves every profile.
+ *
+ * Values were tuned globally by scripts/audit-personalization.js across a
+ * 35-profile matrix (goal × challenge × context, 3,000 real-selector
+ * draws each): the smallest weights that make chosen intent clearly
+ * perceptible (goal+challenge intersections surface materially) without
+ * collapsing diversity or discovery. Exported as an object so the audit
+ * can sweep candidate configurations; production code treats it as const.
+ */
+export const SYNERGY_WEIGHTS = {
+  goalChallenge: 4,
+  goalContext: 2,
+  challengeContext: 2,
+  allThree: 2,
+};
 
 // ── Sequencing penalties (scoring doc §Feed diversity rules) ──
 const RECENT_PENALTY = -100;
@@ -59,15 +93,27 @@ export function baseScore(a: Affirmation, ctx: ScoringContext): number {
   const p = a.personalization;
   let score = 0;
 
-  if (profile.goals.includes(a.category)) score += GOAL_BOOST;
+  const matchesGoal = profile.goals.includes(a.category);
+  if (matchesGoal) score += SIGNAL_WEIGHTS.goal;
 
+  let matchesChallenge = false;
   for (const challenge of profile.currentChallenges) {
-    if (p.needTags.includes(challenge)) score += CHALLENGE_BOOST;
+    if (p.needTags.includes(challenge)) {
+      score += SIGNAL_WEIGHTS.challengePerTag;
+      matchesChallenge = true;
+    }
   }
 
-  if (p.lifeContextAffinity.some((c) => profile.lifeContexts.includes(c))) {
-    score += LIFE_CONTEXT_BOOST;
-  }
+  const matchesContext = p.lifeContextAffinity.some((c) => profile.lifeContexts.includes(c));
+  if (matchesContext) score += SIGNAL_WEIGHTS.lifeContext;
+
+  // Intersection bonuses: matching several signal TYPES at once outranks a
+  // generic single-signal match (each type counts once, however many tags
+  // matched within it).
+  if (matchesGoal && matchesChallenge) score += SYNERGY_WEIGHTS.goalChallenge;
+  if (matchesGoal && matchesContext) score += SYNERGY_WEIGHTS.goalContext;
+  if (matchesChallenge && matchesContext) score += SYNERGY_WEIGHTS.challengeContext;
+  if (matchesGoal && matchesChallenge && matchesContext) score += SYNERGY_WEIGHTS.allThree;
 
   if (profile.ageRange && p.ageAffinity.includes(profile.ageRange)) score += AGE_BOOST;
 
@@ -176,6 +222,19 @@ export interface OrderOptions {
 const POOL_SIZE = 30;
 /** How many best-by-base candidates get sequence-adjusted per pick. */
 const CANDIDATE_WINDOW = 120;
+/** Scores at or below this are hard-blocked by a diversity rule (-1000s). */
+const HARD_BLOCK_THRESHOLD = -500;
+/**
+ * The candidate window must contain at least this many candidates that are
+ * NOT hard-blocked. Without this, a profile whose top-of-score-distribution
+ * is flooded by ONE category (e.g. a strong challenge over a large tag
+ * pool) leaves every windowed candidate carrying the category-run block,
+ * and the -1000 "never a 4th in a row" rule gets bypassed — measured up to
+ * 91% single-category early feeds before this guardrail. Scanning a little
+ * deeper always finds legal alternatives; cost stays bounded.
+ */
+const MIN_UNBLOCKED_CANDIDATES = POOL_SIZE;
+const CANDIDATE_SCAN_CAP = CANDIDATE_WINDOW * 4;
 
 /**
  * Order a pool of eligible messages into a feed: repeated weighted-random
@@ -214,13 +273,14 @@ export function orderFeed(
       scored = scored.filter((entry) => !picked.has(entry.item.id));
     }
     const candidates: { item: Affirmation; score: number }[] = [];
+    let unblocked = 0;
     for (const entry of scored) {
       if (picked.has(entry.item.id)) continue;
-      candidates.push({
-        item: entry.item,
-        score: entry.base + sequencePenalty(entry.item, state, profile),
-      });
-      if (candidates.length >= CANDIDATE_WINDOW) break;
+      const score = entry.base + sequencePenalty(entry.item, state, profile);
+      candidates.push({ item: entry.item, score });
+      if (score > HARD_BLOCK_THRESHOLD) unblocked++;
+      if (candidates.length >= CANDIDATE_WINDOW && unblocked >= MIN_UNBLOCKED_CANDIDATES) break;
+      if (candidates.length >= CANDIDATE_SCAN_CAP) break;
     }
     if (candidates.length === 0) break;
 
