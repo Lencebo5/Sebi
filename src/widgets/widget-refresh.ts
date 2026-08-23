@@ -18,6 +18,21 @@ export function refreshSebiWidget(): void {
       const { requestWidgetUpdate } = await import('react-native-android-widget');
       const { getWidgetDisplay } = await import('@/widgets/widget-content');
       const { SebiWidget } = await import('@/widgets/SebiWidget');
+      const { getWidgetStage, WIDGET_DEBUG } = await import('@/widgets/widget-debug');
+      const { renderWidgetStage } = await import('@/widgets/widget-stages');
+
+      // TEMPORARY: while diagnosing rendering, refresh renders the current
+      // test stage so the Settings row can walk the isolation ladder.
+      const stage = WIDGET_DEBUG ? await getWidgetStage() : 10;
+      console.log(`[SEBI_WIDGET] refresh requested (stage=${stage})`);
+      if (WIDGET_DEBUG && stage < 10) {
+        await requestWidgetUpdate({
+          widgetName: 'Sebi',
+          renderWidget: () => renderWidgetStage(stage),
+        });
+        return;
+      }
+
       const display = await getWidgetDisplay();
       await requestWidgetUpdate({
         widgetName: 'Sebi',
@@ -29,8 +44,9 @@ export function refreshSebiWidget(): void {
             surface: display.surface,
           }),
       });
-    } catch {
-      // Widget refresh is best-effort; the periodic update will catch up.
+    } catch (error) {
+      // Best-effort, but never silent while diagnosing.
+      console.error('[SEBI_WIDGET] refresh failed', error);
     }
   })();
 }

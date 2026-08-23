@@ -1,7 +1,7 @@
 import Constants from 'expo-constants';
 import { useRouter } from 'expo-router';
 import * as WebBrowser from 'expo-web-browser';
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Platform, Pressable, Share, StyleSheet, Text, View } from 'react-native';
 
 import { Icon } from '@/components/Icon';
@@ -17,6 +17,13 @@ import {
 import { usePreferences } from '@/state/PreferencesContext';
 import { useSubscription } from '@/state/SubscriptionContext';
 import { fonts, radius, spacing } from '@/theme/tokens';
+import {
+  advanceWidgetStage,
+  getWidgetStage,
+  WIDGET_DEBUG,
+  WIDGET_STAGE_LABELS,
+} from '@/widgets/widget-debug';
+import { refreshSebiWidget } from '@/widgets/widget-refresh';
 
 interface Row {
   label: string;
@@ -36,6 +43,13 @@ export default function Settings() {
   const { tokens, resetOnboarding } = usePreferences();
   const { isPremium, restore, adapterName } = useSubscription();
   const { showToast } = useToast();
+  // TEMPORARY (widget render diagnosis): current test stage, see widget-debug.ts.
+  const [widgetStage, setWidgetStage] = useState<number | null>(null);
+  useEffect(() => {
+    if (WIDGET_DEBUG && Platform.OS === 'android') {
+      void getWidgetStage().then(setWidgetStage);
+    }
+  }, []);
 
   const storeUrl = Platform.OS === 'android' ? PLAY_STORE_URL : APP_STORE_URL;
 
@@ -86,6 +100,22 @@ export default function Settings() {
       onPress: () => {
         resetOnboarding();
         router.replace('/onboarding');
+      },
+    });
+  }
+
+  // TEMPORARY widget render diagnosis: advances the test stage and refreshes
+  // the placed widget immediately — one build walks the whole ladder.
+  if (WIDGET_DEBUG && Platform.OS === 'android' && widgetStage !== null) {
+    rows.push({
+      label: `Widget test: ${WIDGET_STAGE_LABELS[widgetStage]}`,
+      gapAbove: true,
+      onPress: () => {
+        void advanceWidgetStage().then((next) => {
+          setWidgetStage(next);
+          refreshSebiWidget();
+          showToast(`Widget faza: ${WIDGET_STAGE_LABELS[next]}`);
+        });
       },
     });
   }
