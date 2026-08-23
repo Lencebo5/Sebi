@@ -204,7 +204,9 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
-    if (patch.profile || patch.onboardingCompleted !== undefined) refreshSebiWidget({ force: true });
+    // Onboarding completion / full-profile writes are explicit
+    // personalization changes; theme, notifications etc. never refresh.
+    if (patch.profile || patch.onboardingCompleted !== undefined) refreshSebiWidget('personalization');
   }, []);
 
   const updateProfile = useCallback((patch: Partial<PersonalizationProfile>) => {
@@ -213,8 +215,12 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
-    // The home-screen widget personalizes from the same profile.
-    refreshSebiWidget({ force: true });
+    // The home-screen widget personalizes from the same profile. Only
+    // content-affecting fields replace the current widget message —
+    // addressMode has no scoring/filtering role (texts are never rewritten),
+    // so changing it alone must not churn what is on the home screen.
+    const affectsContent = Object.keys(patch).some((key) => key !== 'addressMode');
+    refreshSebiWidget(affectsContent ? 'personalization' : 'maintenance');
   }, []);
 
   const resetOnboarding = useCallback(() => {

@@ -59,7 +59,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setIsPremium(true);
       track('subscription_started', { plan });
       void writeJson(StorageKeys.premiumCache, true);
-      refreshSebiWidget({ force: true });
+      refreshSebiWidget('entitlement');
     }
     return active;
   }, [adapter]);
@@ -70,7 +70,7 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
       setIsPremium(true);
       track('subscription_restored');
       void writeJson(StorageKeys.premiumCache, true);
-      refreshSebiWidget({ force: true });
+      refreshSebiWidget('entitlement');
     }
     return active;
   }, [adapter]);

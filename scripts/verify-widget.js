@@ -137,24 +137,51 @@ check('premium queue also honors the no-repeat window', (() => {
 // ---------------------------------------------------------------------------
 console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)');
 (async () => {
-  // Empty storage: generates, writes only widget-scoped keys.
+  // Substantially different profiles (same as the personalization verifier).
+  const PROFILE_A = { ageRange: '18_24', goals: ['motivation', 'confidence'], currentChallenges: ['focus_attention', 'self_criticism'], lifeContexts: ['student_early_career'], addressMode: 'neutral', deliveryStyle: 'direct' };
+  const PROFILE_B = { ageRange: '35_44', goals: ['calm', 'work_success', 'self_love'], currentChallenges: ['stress_overload', 'worry_overthinking'], lifeContexts: ['family_children', 'career_business'], addressMode: 'neutral', deliveryStyle: 'grounded' };
+  const setProfile = (profile) => memoryStore.set('danas.preferences.v1', JSON.stringify({ version: 2, profile }));
+  const parse = (payload) => (payload ? JSON.parse(payload) : []);
+  const currentMirrorId = () => JSON.parse(memoryStore.get('danas.widget-queue.v1')).slots[0].id;
+
+  // A: first generation under Profile A -> current slot X.
   memoryStore.clear();
   storageLog.writes.length = 0;
-  const first = await buildWidgetQueuePayload();
-  const firstSlots = first ? JSON.parse(first) : [];
-  check('empty storage -> payload generated', Array.isArray(firstSlots) && firstSlots.length >= WIDGET_QUEUE_MIN_SLOTS, `${firstSlots.length}`);
+  setProfile(PROFILE_A);
+  const firstSlots = parse(await buildWidgetQueuePayload());
+  check('A: empty storage -> payload generated', firstSlots.length >= WIDGET_QUEUE_MIN_SLOTS, `${firstSlots.length}`);
   const widgetKeys = new Set(['danas.widget-queue.v1', 'danas.widget-recent-ids.v1']);
   check('only widget-scoped storage keys written', storageLog.writes.every((k) => widgetKeys.has(k)), storageLog.writes.join(','));
+  const X = firstSlots[0];
 
-  // Fresh queue: unforced call skips regeneration.
-  const second = await buildWidgetQueuePayload();
-  check('fresh queue -> unforced call skips regeneration', second === null);
+  // C: app open without personalization changes -> nothing moves.
+  check('C: app open with fresh queue skips regeneration', (await buildWidgetQueuePayload()) === null);
+  check('C: current slot remains unchanged after app open', currentMirrorId() === X.id);
 
-  // Forced call regenerates but preserves the currently shown slot.
-  const forced = await buildWidgetQueuePayload({ force: true });
-  const forcedSlots = forced ? JSON.parse(forced) : [];
-  check('forced call regenerates', Array.isArray(forcedSlots) && forcedSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
-  check('forced regen preserves the current on-screen slot', forcedSlots.length > 0 && forcedSlots[0].id === firstSlots[0].id, `${forcedSlots[0]?.id} vs ${firstSlots[0]?.id}`);
+  // B: explicit personalization change -> new current-period selection.
+  setProfile(PROFILE_B);
+  const bSlots = parse(await buildWidgetQueuePayload('personalization'));
+  check('B: personalization change always regenerates', bSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
+  check('B: current slot re-picked for the SAME date/period', bSlots[0].date === X.date && bSlots[0].period === X.period);
+  check('B: current message differs from X (eligible alternatives exist)', bSlots[0].id !== X.id, `${bSlots[0].id} vs ${X.id}`);
+  check('B: new current message is a valid entitled pick', !!byId.get(bSlots[0].id) && !byId.get(bSlots[0].id).premium);
+  const aIds = new Set(firstSlots.map((s) => s.id));
+  const sharedWithA = bSlots.filter((s) => aIds.has(s.id)).length / bSlots.length;
+  check('B: queue reflects the new profile (low overlap with A)', sharedWithA < 0.5, `${(sharedWithA * 100).toFixed(0)}% shared`);
+
+  // D: maintenance regeneration (stale queue, same profile) -> preserved.
+  const mirrorD = JSON.parse(memoryStore.get('danas.widget-queue.v1'));
+  mirrorD.generatedAt = Date.now() - 4 * 24 * 60 * 60 * 1000;
+  memoryStore.set('danas.widget-queue.v1', JSON.stringify(mirrorD));
+  const dSlots = parse(await buildWidgetQueuePayload());
+  check('D: stale-queue maintenance regenerates', dSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
+  check('D: maintenance preserves the current on-screen slot', dSlots[0].id === bSlots[0].id, `${dSlots[0]?.id} vs ${bSlots[0].id}`);
+
+  // Entitlement change: rebuild, but the entitled current slot survives.
+  memoryStore.set('danas.premium-cache.v1', JSON.stringify(true));
+  const entSlots = parse(await buildWidgetQueuePayload('entitlement'));
+  check('entitlement change regenerates', entSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
+  check('entitlement change preserves the entitled current slot', entSlots[0].id === dSlots[0].id);
 
   // Premium downgrade: a premium current slot must be re-picked as Free.
   const premiumItem = AFFIRMATIONS.find((a) => a.premium && a.charCount <= SMALL_SAFE_CHARS);
@@ -163,8 +190,7 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   mirror.slots[0] = { ...mirror.slots[0], id: premiumItem.id, text: premiumItem.text, tier: lengthTier(premiumItem.charCount) };
   memoryStore.set('danas.widget-queue.v1', JSON.stringify(mirror));
   memoryStore.set('danas.premium-cache.v1', JSON.stringify(false));
-  const downgraded = await buildWidgetQueuePayload();
-  const downgradedSlots = downgraded ? JSON.parse(downgraded) : [];
+  const downgradedSlots = parse(await buildWidgetQueuePayload());
   check('premium downgrade triggers regeneration', downgradedSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
   check('downgrade re-picks the current slot as Free', downgradedSlots.length > 0 && downgradedSlots[0].id !== premiumItem.id && !byId.get(downgradedSlots[0].id).premium, downgradedSlots[0]?.id);
 
@@ -180,6 +206,17 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   const resilient = await buildWidgetQueuePayload();
   storageLog.failMode = false;
   check('storage failure still yields a valid payload', resilient !== null && JSON.parse(resilient).length >= WIDGET_QUEUE_MIN_SLOTS);
+
+  // Reason plumbing: the right call sites request the right reasons.
+  const prefsCtx = fs.readFileSync(path.join(ROOT, 'src/state/PreferencesContext.tsx'), 'utf8');
+  check("profile edits request a 'personalization' refresh", prefsCtx.includes("refreshSebiWidget(affectsContent ? 'personalization' : 'maintenance')") && prefsCtx.includes("refreshSebiWidget('personalization')"));
+  check('addressMode-only edits never churn the current message', prefsCtx.includes("key !== 'addressMode'"));
+  const subsCtx = fs.readFileSync(path.join(ROOT, 'src/state/SubscriptionContext.tsx'), 'utf8');
+  check("premium changes request an 'entitlement' refresh", subsCtx.includes("refreshSebiWidget('entitlement')"));
+  const refreshSrc = fs.readFileSync(path.join(ROOT, 'src/widgets/widget-refresh.ts'), 'utf8');
+  check('refresh delivers the queue to native (setQueue -> immediate re-render)', refreshSrc.includes('storage.setQueue(payload)'));
+  const layoutSrc = fs.readFileSync(path.join(ROOT, 'src/app/_layout.tsx'), 'utf8');
+  check('app open uses the default maintenance reason', layoutSrc.includes('refreshSebiWidget()'));
 
   runStaticChecks();
   runNativeTests();

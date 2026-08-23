@@ -1,11 +1,16 @@
 import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
+import type { WidgetRefreshReason } from '@/widgets/widget-content';
+
 /**
- * Regenerate the widget queue and hand it to the native widget. Called
- * after personalization changes, premium changes and onboarding completion
- * (force: true — always rebuild) and once per app open (unforced — rebuilds
- * only when the stored queue is stale or low; see widget-content.ts).
+ * Regenerate the widget queue and hand it to the native widget.
+ *
+ * The reason routes the behavior (see WidgetRefreshReason in
+ * widget-content.ts): 'personalization' rebuilds with the new profile and
+ * replaces the currently shown message immediately; 'entitlement' rebuilds
+ * but keeps the current message while entitled; 'maintenance' (app open)
+ * only tops up a stale/low queue and never disturbs the current message.
  *
  * No-ops on iOS/web and in Expo Go (no native module there) and never
  * throws into the app; failures in a real Android build are logged loudly.
@@ -13,7 +18,7 @@ import { Platform } from 'react-native';
 
 const isExpoGo = Constants.executionEnvironment === ExecutionEnvironment.StoreClient;
 
-export function refreshSebiWidget(options: { force?: boolean } = {}): void {
+export function refreshSebiWidget(reason: WidgetRefreshReason = 'maintenance'): void {
   if (Platform.OS !== 'android' || isExpoGo) return;
   void (async () => {
     try {
@@ -26,13 +31,13 @@ export function refreshSebiWidget(options: { force?: boolean } = {}): void {
         return;
       }
       const { buildWidgetQueuePayload } = await import('@/widgets/widget-content');
-      const payload = await buildWidgetQueuePayload(options);
+      const payload = await buildWidgetQueuePayload(reason);
       if (payload == null) {
-        console.log('[SEBI_WIDGET] queue still fresh — no regeneration needed');
+        console.log(`[SEBI_WIDGET] queue still fresh (${reason}) — no regeneration needed`);
         return;
       }
       const slots = await storage.setQueue(payload);
-      console.log(`[SEBI_WIDGET] queue delivered (${slots} slots)`);
+      console.log(`[SEBI_WIDGET] queue delivered (${slots} slots, reason=${reason})`);
     } catch (error) {
       console.error('[SEBI_WIDGET] queue refresh failed', error);
     }

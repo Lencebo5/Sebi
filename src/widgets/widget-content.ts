@@ -20,6 +20,23 @@ import { SMALL_SAFE_CHARS } from '@/widgets/widget-select';
  * the widget never mutates app recents, favorites, streak or feed state.
  */
 
+/**
+ * Why a queue rebuild was requested — decides both whether a fresh queue is
+ * rebuilt at all and whether the currently shown slot survives:
+ *
+ * - 'personalization': the user explicitly changed content-affecting profile
+ *   fields (goals, challenges, life contexts, age range, delivery style).
+ *   Always rebuilds with the NEW profile and INVALIDATES the current-period
+ *   slot so the home screen reflects the change immediately.
+ * - 'entitlement': premium state changed. Always rebuilds; the current slot
+ *   is preserved while still entitled (a lapsed premium slot is re-picked).
+ * - 'maintenance': app open / background upkeep. Rebuilds only when the
+ *   stored queue is missing, low, old, from another content version or
+ *   entitlement state — and always preserves the current slot. Unrelated
+ *   settings (theme, notifications) never reach the widget at all.
+ */
+export type WidgetRefreshReason = 'personalization' | 'entitlement' | 'maintenance';
+
 /** JS-side mirror of the last delivered queue, for staleness checks. */
 export interface WidgetQueueMirror {
   version: 1;
@@ -63,39 +80,29 @@ function futureSlotCount(slots: WidgetQueueSlot[], now: Date): number {
   return slots.filter((slot) => slotKey(slot.date, slot.period) >= nowKey).length;
 }
 
-/**
- * The message currently on the home screen stays stable across
- * regenerations within its period — unless it is no longer valid (content
- * migration) or no longer entitled (premium lapsed).
- */
-function preservedCurrentSlot(
-  mirror: WidgetQueueMirror | null,
-  isPremium: boolean,
-  now: Date,
-): WidgetQueueSlot | null {
+/** The slot the widget is showing right now, straight from the mirror. */
+function currentMirrorSlot(mirror: WidgetQueueMirror | null, now: Date): WidgetQueueSlot | null {
   if (!mirror || !Array.isArray(mirror.slots)) return null;
   const date = isoDate(now);
   const period = periodForHour(now.getHours());
-  const slot = mirror.slots.find((s) => s.date === date && s.period === period);
-  if (!slot) return null;
+  return mirror.slots.find((s) => s.date === date && s.period === period) ?? null;
+}
+
+/** Still a valid, entitled, small-safe corpus message? */
+function isPreservable(slot: WidgetQueueSlot, isPremium: boolean): boolean {
   const affirmation = getAffirmation(slot.id);
-  if (!affirmation || affirmation.text !== slot.text) return null;
-  if (!isPremium && affirmation.premium) return null;
-  if (affirmation.charCount > SMALL_SAFE_CHARS) return null;
-  return slot;
+  if (!affirmation || affirmation.text !== slot.text) return false;
+  if (!isPremium && affirmation.premium) return false;
+  return affirmation.charCount <= SMALL_SAFE_CHARS;
 }
 
 /**
  * Build the queue payload for the native widget, or return null when the
- * stored queue is still fresh and regeneration was not forced.
- *
- * Forced regeneration (personalization change, premium change, onboarding
- * completion) always rebuilds; unforced calls (app open) rebuild only when
- * the queue is missing, low, old, from another content version, or from a
- * different entitlement state.
+ * stored queue is still fresh and the reason was routine maintenance.
+ * See WidgetRefreshReason for the preserve/invalidate semantics.
  */
 export async function buildWidgetQueuePayload(
-  options: { force?: boolean } = {},
+  reason: WidgetRefreshReason = 'maintenance',
   now: Date = new Date(),
 ): Promise<string | null> {
   const [profile, isPremium, recent, mirror] = await Promise.all([
@@ -113,12 +120,16 @@ export async function buildWidgetQueuePayload(
     mirror.isPremium === isPremium &&
     now.getTime() - mirror.generatedAt < REGEN_MAX_AGE_MS &&
     futureSlotCount(mirror.slots, now) >= REGEN_MIN_FUTURE_SLOTS;
-  if (fresh && !options.force) return null;
+  if (fresh && reason === 'maintenance') return null;
 
-  const preserved = preservedCurrentSlot(mirror, isPremium, now);
-  const seed = preserved
-    ? [...recent.filter((id) => id !== preserved.id), preserved.id]
-    : recent;
+  const current = currentMirrorSlot(mirror, now);
+  const preserved =
+    reason !== 'personalization' && current && isPreservable(current, isPremium) ? current : null;
+  // Either way the on-screen id goes into the exclusion seed: preserved so
+  // the generator does not duplicate it, invalidated (personalization
+  // change) so the fresh current-period pick DIFFERS from it whenever an
+  // eligible alternative exists.
+  const seed = current ? [...recent.filter((id) => id !== current.id), current.id] : recent;
 
   const generated = generateWidgetQueue(AFFIRMATIONS, profile, isPremium, seed, now);
   let slots = generated.slots;
