@@ -1,7 +1,8 @@
 import { AFFIRMATIONS, CONTENT_SCHEMA_VERSION, getAffirmation } from '@/content/affirmations';
-import type { PersonalizationProfile, Preferences } from '@/models/types';
+import type { CategoryId, PersonalizationProfile, Preferences } from '@/models/types';
 import { periodForHour } from '@/services/personalization';
 import { readJson, StorageKeys, writeJson } from '@/services/storage';
+import { effectiveTopics, topicsFromGoals } from '@/services/topics';
 import {
   generateWidgetQueue,
   isoDate,
@@ -43,6 +44,8 @@ export interface WidgetQueueMirror {
   generatedAt: number;
   contentVersion: number;
   isPremium: boolean;
+  /** Sorted effective widget topics the queue was generated with. */
+  topicsKey?: string;
   slots: WidgetQueueSlot[];
 }
 
@@ -61,14 +64,28 @@ const DEFAULT_PROFILE: PersonalizationProfile = {
   deliveryStyle: 'mixed',
 };
 
-async function readProfile(): Promise<PersonalizationProfile> {
-  const prefs = await readJson<Partial<Preferences> | null>(StorageKeys.preferences, null);
-  if (prefs && prefs.version === 2 && prefs.profile) {
-    return { ...DEFAULT_PROFILE, ...prefs.profile };
-  }
-  // Pre-onboarding / legacy storage: neutral profile, still personalized by
-  // time of day and fully eligible Free content.
-  return DEFAULT_PROFILE;
+interface WidgetInputs {
+  profile: PersonalizationProfile;
+  /** Effective WIDGET topics (custom for Premium, else follow-feed). */
+  topics: (isPremium: boolean) => CategoryId[];
+}
+
+type StoredWidgetPrefs = Omit<Partial<Preferences>, 'version'> & { version?: number };
+
+async function readWidgetInputs(): Promise<WidgetInputs> {
+  const prefs = await readJson<StoredWidgetPrefs | null>(StorageKeys.preferences, null);
+  const versioned = prefs && (prefs.version === 2 || prefs.version === 3) && prefs.profile;
+  const profile = versioned ? { ...DEFAULT_PROFILE, ...prefs.profile } : DEFAULT_PROFILE;
+  return {
+    profile,
+    topics: (isPremium: boolean) => {
+      if (prefs?.version === 3 && prefs.topics) {
+        return effectiveTopics('widget', prefs.topics, isPremium);
+      }
+      // v2 storage not yet migrated (or pre-onboarding): topics mirror goals.
+      return topicsFromGoals(profile.goals);
+    },
+  };
 }
 
 function slotKey(date: string, period: string): string {
@@ -89,10 +106,10 @@ function currentMirrorSlot(mirror: WidgetQueueMirror | null, now: Date): WidgetQ
 }
 
 /** Still a valid, entitled, small-safe corpus message? */
-function isPreservable(slot: WidgetQueueSlot, isPremium: boolean): boolean {
+function isPreservable(slot: WidgetQueueSlot, isPremium: boolean, topics: CategoryId[]): boolean {
   const affirmation = getAffirmation(slot.id);
   if (!affirmation || affirmation.text !== slot.text) return false;
-  if (!isPremium && affirmation.premium) return false;
+  if (!isPremium && affirmation.premium && !topics.includes(affirmation.category)) return false;
   return affirmation.charCount <= SMALL_SAFE_CHARS;
 }
 
@@ -105,12 +122,15 @@ export async function buildWidgetQueuePayload(
   reason: WidgetRefreshReason = 'maintenance',
   now: Date = new Date(),
 ): Promise<string | null> {
-  const [profile, isPremium, recent, mirror] = await Promise.all([
-    readProfile(),
+  const [inputs, isPremium, recent, mirror] = await Promise.all([
+    readWidgetInputs(),
     readJson<boolean>(StorageKeys.premiumCache, false),
     readJson<string[]>(StorageKeys.widgetRecentIds, []),
     readJson<WidgetQueueMirror | null>(StorageKeys.widgetQueue, null),
   ]);
+  const { profile } = inputs;
+  const topics = inputs.topics(isPremium);
+  const topicsKey = [...topics].sort().join(',');
 
   const fresh =
     mirror != null &&
@@ -118,20 +138,23 @@ export async function buildWidgetQueuePayload(
     Array.isArray(mirror.slots) &&
     mirror.contentVersion === CONTENT_SCHEMA_VERSION &&
     mirror.isPremium === isPremium &&
+    mirror.topicsKey === topicsKey &&
     now.getTime() - mirror.generatedAt < REGEN_MAX_AGE_MS &&
     futureSlotCount(mirror.slots, now) >= REGEN_MIN_FUTURE_SLOTS;
   if (fresh && reason === 'maintenance') return null;
 
   const current = currentMirrorSlot(mirror, now);
   const preserved =
-    reason !== 'personalization' && current && isPreservable(current, isPremium) ? current : null;
+    reason !== 'personalization' && current && isPreservable(current, isPremium, topics)
+      ? current
+      : null;
   // Either way the on-screen id goes into the exclusion seed: preserved so
   // the generator does not duplicate it, invalidated (personalization
   // change) so the fresh current-period pick DIFFERS from it whenever an
   // eligible alternative exists.
   const seed = current ? [...recent.filter((id) => id !== current.id), current.id] : recent;
 
-  const generated = generateWidgetQueue(AFFIRMATIONS, profile, isPremium, seed, now);
+  const generated = generateWidgetQueue(AFFIRMATIONS, profile, isPremium, seed, now, undefined, topics);
   let slots = generated.slots;
   if (preserved) {
     slots = [
@@ -151,6 +174,7 @@ export async function buildWidgetQueuePayload(
     generatedAt: now.getTime(),
     contentVersion: CONTENT_SCHEMA_VERSION,
     isPremium,
+    topicsKey,
     slots,
   };
   await writeJson(StorageKeys.widgetQueue, nextMirror);

@@ -1,4 +1,4 @@
-import type { Affirmation, PersonalizationProfile } from '@/models/types';
+import type { Affirmation, CategoryId, PersonalizationProfile } from '@/models/types';
 import { periodForHour, type DayPeriod } from '@/services/personalization';
 import { selectWidgetAffirmation, widgetLabel, lengthTier, type LengthTier } from '@/widgets/widget-select';
 
@@ -54,6 +54,7 @@ export function generateWidgetQueue(
   seedRecentIds: string[],
   now: Date,
   rng?: () => number,
+  topics: CategoryId[] = [],
 ): { slots: WidgetQueueSlot[]; recentIds: string[] } {
   const slots: WidgetQueueSlot[] = [];
   let recent = [...seedRecentIds];
@@ -71,6 +72,7 @@ export function generateWidgetQueue(
         recent.slice(-WIDGET_HISTORY_SIZE),
         isPremium,
         rng,
+        topics,
       );
       if (!picked) continue;
       slots.push({

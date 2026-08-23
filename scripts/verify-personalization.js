@@ -294,5 +294,71 @@ check('labels map to Serbian display text', widgetLabel(sampleMorning) === 'DOBR
 // Time-of-day surfaces (design 1f) are decided natively now — the mapping
 // is verified statically against SebiWidgetProvider.java by verify-widget.
 
+// ── Topic preferences: category intent, Free preview, no double-count ────
+console.log('\nTOPIC PREFERENCES + SURFACES');
+const { surfacePool } = require('../.test-build/services/topics.js');
+
+// §23 real-device regression profile: FREE user, work_success goal+topic.
+const realProfile = { goals: ['work_success'], currentChallenges: ['self_criticism'], lifeContexts: ['career_business'], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const realTopics = ['work_success'];
+const realPool = surfacePool(ITEMS, 'personalized_feed', false, realTopics);
+check('free pool admits ONLY the selected premium topic', realPool.every((a) => !a.premium || a.category === 'work_success'));
+check('free pool includes work_success preview content', realPool.some((a) => a.category === 'work_success'));
+const realFeed = orderFeed(realPool, realProfile, { period: 'day', recentIds: [], preferredCategories: realTopics, personalizedCount: 150, rng: mulberry32(31) }).slice(0, 150);
+for (const n of [20, 60, 150]) {
+  const win = realFeed.slice(0, n);
+  const dist = {};
+  win.forEach((a) => { dist[a.category] = (dist[a.category] || 0) + 1; });
+  console.log(`  first ${n}: ` + Object.entries(dist).sort((a, b) => b[1] - a[1]).map(([c, k]) => `${c} ${((k * 100) / n).toFixed(0)}%`).join(', '));
+  const ws = (dist.work_success || 0) / n;
+  check(`Free work profile visibly receives work_success in first ${n}`, ws >= 0.2, `${(ws * 100).toFixed(0)}%`);
+}
+check('no unrelated premium leakage in the real-profile feed', realFeed.every((a) => !a.premium || a.category === 'work_success'));
+
+// No leakage without the topic; category browsing stays gated.
+check('free user without the work topic gets no work_success', surfacePool(ITEMS, 'personalized_feed', false, ['calm']).every((a) => a.category !== 'work_success'));
+check('free user with no topics gets zero premium content', surfacePool(ITEMS, 'personalized_feed', false, []).every((a) => !a.premium));
+check('category browsing stays fully gated for Free', surfacePool(ITEMS, 'category_feed', false, ['work_success']).every((a) => !a.premium));
+
+// No double scoring: goal + identical preferred topic == goal alone.
+const wsItem = ITEMS.find((a) => a.category === 'work_success' && a.personalization.needTags.includes('self_criticism'));
+check('goal + identical preferred topic never double-counts',
+  baseScore(wsItem, { profile: realProfile, period: 'day' }) ===
+  baseScore(wsItem, { profile: realProfile, period: 'day', preferredCategories: ['work_success'] }));
+
+// Topic-as-intent: an explicit topic earns exactly what a goal would.
+const noGoals = { goals: [], currentChallenges: ['worry_overthinking'], lifeContexts: [], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const calmWorry = ITEMS.find((a) => a.category === 'calm' && a.personalization.needTags.includes('worry_overthinking'));
+check('preferred topic earns the same category intent + synergy as a goal',
+  baseScore(calmWorry, { profile: { ...noGoals, goals: ['calm'] }, period: 'day' }) ===
+  baseScore(calmWorry, { profile: noGoals, period: 'day', preferredCategories: ['calm'] }));
+
+// §24 regression matrix: topic aligned with goal AND divergent from it.
+const MATRIX24 = [
+  ['calm', 'worry_overthinking', 'family_children'],
+  ['motivation', 'low_energy_motivation', 'student_early_career'],
+  ['relationships', 'loneliness_disconnection', 'relationship'],
+  ['self_love', 'difficult_period', 'major_change'],
+  ['confidence', 'focus_attention', 'student_early_career'],
+  ['money', 'worry_overthinking', 'career_business'],
+];
+for (const [goal24, chal24, life24] of MATRIX24) {
+  const profile24 = { goals: [goal24], currentChallenges: [chal24], lifeContexts: [life24], addressMode: 'neutral', deliveryStyle: 'mixed' };
+  const aligned = orderFeed(ITEMS, profile24, { period: 'day', recentIds: [], preferredCategories: [goal24], personalizedCount: 60, rng: mulberry32(41) }).slice(0, 60);
+  const alignedShare = aligned.filter((a) => a.category === goal24).length / 60;
+  // Divergent topics compete with a structurally stronger challenge signal
+  // (which stays dominant by design), so presence is measured over 150
+  // draws — a few days of browsing — not just the first screenfuls. For
+  // difficult_period the tone-safety boosts INTENTIONALLY outrank a flat
+  // topic preference (gentle/grounded content first); the topic still
+  // arrives, just later — measured at 300.
+  const horizon = chal24 === 'difficult_period' ? 300 : 150;
+  const divergent = orderFeed(ITEMS, profile24, { period: 'day', recentIds: [], preferredCategories: ['gratitude'], personalizedCount: horizon, rng: mulberry32(42) }).slice(0, horizon);
+  const topicShare = divergent.filter((a) => a.category === 'gratitude').length / horizon;
+  const goalShare = divergent.filter((a) => a.category === goal24).length / horizon;
+  check(`${goal24}+${chal24}: aligned topic keeps goal visible without over-concentration`, alignedShare >= 0.1 && alignedShare <= 0.76, `${(alignedShare * 100).toFixed(0)}%`);
+  check(`${goal24}+${chal24}: divergent manual topic surfaces alongside goal`, topicShare > 0 && goalShare > 0, `topic ${(topicShare * 100).toFixed(0)}% goal ${(goalShare * 100).toFixed(0)}%`);
+}
+
 console.log(`\nWIDGET+CORE: ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECKS FAILED'}`);
 process.exitCode = failures === 0 ? 0 : 1;

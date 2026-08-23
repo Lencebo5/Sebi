@@ -1,5 +1,6 @@
-import type { Affirmation, PersonalizationProfile } from '@/models/types';
+import type { Affirmation, CategoryId, PersonalizationProfile } from '@/models/types';
 import { pickOne, type DayPeriod } from '@/services/personalization';
+import { surfacePool } from '@/services/topics';
 
 /**
  * Pure widget content selection — no storage, no React, no native modules —
@@ -18,13 +19,18 @@ export const SMALL_SAFE_CHARS = 78;
 /** Messages safely renderable in the 4×2 widget at the 19.5–17 tiers. */
 export const MEDIUM_SAFE_CHARS = 125;
 
-/** Free/premium eligibility mirrors the app's category-level model. */
+/**
+ * Widget eligibility: category-level entitlement plus the personalized-
+ * surface topic extension (services/topics.ts) — a Free user's explicitly
+ * preferred Premium-category topics stay eligible on the widget.
+ */
 export function eligibleWidgetPool(
   items: Affirmation[],
   isPremium: boolean,
   maxChars: number = SMALL_SAFE_CHARS,
+  topics: CategoryId[] = [],
 ): Affirmation[] {
-  const entitled = isPremium ? items : items.filter((a) => !a.premium);
+  const entitled = surfacePool(items, 'widget', isPremium, topics);
   const fitting = entitled.filter((a) => a.charCount <= maxChars);
   if (fitting.length > 0) return fitting;
   // Fail gracefully if a future corpus outgrows the widget: fall back to
@@ -41,12 +47,14 @@ export function selectWidgetAffirmation(
   widgetRecentIds: string[],
   isPremium: boolean,
   rng?: () => number,
+  topics: CategoryId[] = [],
 ): Affirmation | undefined {
-  const pool = eligibleWidgetPool(items, isPremium);
+  const pool = eligibleWidgetPool(items, isPremium, SMALL_SAFE_CHARS, topics);
+  const options = { period, rng, preferredCategories: topics };
   return (
-    pickOne(pool, profile, { period, exclude: widgetRecentIds, rng }) ??
+    pickOne(pool, profile, { ...options, exclude: widgetRecentIds }) ??
     // History may exclude everything in a tiny pool — retry without it.
-    pickOne(pool, profile, { period, rng })
+    pickOne(pool, profile, options)
   );
 }
 

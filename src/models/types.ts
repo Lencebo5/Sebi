@@ -132,13 +132,46 @@ export interface StreakState {
   lastActiveDate: string | null;
 }
 
+// ── Surface topic preferences (schema v3) ──
+// Personalization = Sebi chooses for me; topics = I tell Sebi what I want
+// more of. Categories stay browseable feeds AND become explicit signals.
+
+export type TopicMode = 'follow_feed' | 'custom';
+
+export interface SurfaceTopicSelection {
+  mode: TopicMode;
+  /**
+   * Saved custom picks. Kept across Premium downgrades (no data loss) —
+   * while Free the EFFECTIVE mode falls back to follow_feed.
+   */
+  categoryIds: CategoryId[];
+}
+
+export interface SurfaceTopics {
+  feed: {
+    /** Preferred Za danas topics (1–5). */
+    categoryIds: CategoryId[];
+    /**
+     * False while topics simply mirror the user's Goals (kept in sync on
+     * every goal change). True once the user edits topics directly in the
+     * Categories UI — from then on goals never overwrite them.
+     */
+    customized: boolean;
+  };
+  widget: SurfaceTopicSelection;
+  notifications: SurfaceTopicSelection;
+}
+
 export interface Preferences {
-  /** Persisted-schema version; bump alongside migrations in PreferencesContext. */
-  version: 2;
+  /** Persisted-schema version; bump alongside migrations in preferences-migrate. */
+  version: 3;
   onboardingCompleted: boolean;
   profile: PersonalizationProfile;
   themeId: string;
   notifications: NotificationSettings;
+  topics: SurfaceTopics;
+  /** One-time post-first-message reminder opt-in prompt (Phase 2). */
+  notificationOptInPromptSeen: boolean;
 }
 
 export type SubscriptionPlan = 'monthly' | 'annual';
@@ -165,6 +198,14 @@ export interface AnalyticsEventMap {
   affirmation_favorited: { id: string };
   affirmation_shared: { id: string };
   category_opened: { category: string };
+  premium_category_opened: { category: string; locked: boolean };
+  feed_topic_selected: { category: string };
+  feed_topic_removed: { category: string };
+  widget_topic_mode_changed: { mode: string };
+  notification_topic_mode_changed: { mode: string };
+  notification_optin_shown: undefined;
+  notification_optin_enabled: undefined;
+  notification_optin_declined: undefined;
   notification_enabled: { times: number };
   paywall_viewed: { source: string };
   subscription_started: { plan: string };

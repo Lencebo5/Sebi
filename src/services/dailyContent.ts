@@ -1,35 +1,34 @@
 import { RECENT_HISTORY_SIZE } from '@/constants/appConfig';
 import { AFFIRMATIONS, getAffirmationsByCategory } from '@/content/affirmations';
-import { getCategory } from '@/content/categories';
 import type { Affirmation, CategoryId, PersonalizationProfile } from '@/models/types';
 import { orderFeed, periodForHour, pickOne } from '@/services/personalization';
+import { surfacePool } from '@/services/topics';
 
 /**
  * Feed construction on top of the personalization engine
- * (services/personalization.ts). Entitlement stays category-level: free
- * users never receive messages from Premium categories in generated feeds.
+ * (services/personalization.ts). Eligibility is per SURFACE
+ * (services/topics.ts): category browsing keeps pure category-level
+ * entitlement, while personalized surfaces admit Premium-category messages
+ * a Free user explicitly selected as preferred topics — and nothing else.
  */
 
-/** Everything the current plan may show in the personalized feed. */
-function accessiblePool(isPremium: boolean): Affirmation[] {
-  if (isPremium) return AFFIRMATIONS;
-  return AFFIRMATIONS.filter((a) => !getCategory(a.category).premium);
-}
-
 /**
- * "Za danas" — the most personalized feed: goals, current challenges, life
- * context, delivery style, age affinity, time of day and recent history all
- * shape the order.
+ * "Za danas" — the most personalized feed: goals, preferred topics,
+ * current challenges, life context, delivery style, age affinity, time of
+ * day and recent history all shape the order. Preferred topics are a
+ * BOOST (category intent), never a hard filter.
  */
 export function buildTodayFeed(
   profile: PersonalizationProfile,
   isPremium: boolean,
   recentIds: string[],
+  feedTopics: CategoryId[] = [],
   now: Date = new Date(),
 ): Affirmation[] {
-  return orderFeed(accessiblePool(isPremium), profile, {
+  return orderFeed(surfacePool(AFFIRMATIONS, 'personalized_feed', isPremium, feedTopics), profile, {
     period: periodForHour(now.getHours()),
     recentIds,
+    preferredCategories: feedTopics,
   });
 }
 
@@ -66,10 +65,16 @@ export function notificationAffirmation(
   isPremium: boolean,
   fireDate: Date,
   exclude: string[] = [],
+  notificationTopics: CategoryId[] = [],
 ): Affirmation {
-  const picked = pickOne(accessiblePool(isPremium), profile, {
-    period: periodForHour(fireDate.getHours()),
-    exclude,
-  });
+  const picked = pickOne(
+    surfacePool(AFFIRMATIONS, 'notification', isPremium, notificationTopics),
+    profile,
+    {
+      period: periodForHour(fireDate.getHours()),
+      exclude,
+      preferredCategories: notificationTopics,
+    },
+  );
   return picked ?? AFFIRMATIONS[0];
 }

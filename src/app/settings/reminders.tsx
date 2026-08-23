@@ -4,6 +4,7 @@ import { Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native
 
 import { Icon } from '@/components/Icon';
 import { Screen } from '@/components/Screen';
+import { TopicModeSection } from '@/components/TopicModeSection';
 import { bumpHour, TimeStepperRow } from '@/components/TimeStepperRow';
 import { useToast } from '@/components/Toast';
 import { FREE_LIMITS, PREMIUM_LIMITS } from '@/constants/appConfig';
@@ -24,7 +25,7 @@ import { fonts, radius, spacing } from '@/theme/tokens';
  */
 export default function Reminders() {
   const router = useRouter();
-  const { tokens, preferences, updatePreferences } = usePreferences();
+  const { tokens, preferences, updatePreferences, setSurfaceTopics } = usePreferences();
   const { isPremium } = useSubscription();
   const { showToast } = useToast();
   const [denied, setDenied] = useState(false);
@@ -126,6 +127,15 @@ export default function Reminders() {
           </Text>
         )}
       </View>
+
+      <TopicModeSection
+        title="Teme podsetnika"
+        selection={preferences.topics.notifications}
+        isPremium={isPremium}
+        seedCategoryIds={preferences.topics.feed.categoryIds}
+        onChange={(selection) => setSurfaceTopics('notifications', selection)}
+        onLockedCustom={() => router.push('/paywall?source=reminder_topics')}
+      />
     </Screen>
   );
 }

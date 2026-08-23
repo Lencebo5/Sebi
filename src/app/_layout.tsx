@@ -21,6 +21,7 @@ import {
   configureNotificationHandling,
   rescheduleNotifications,
 } from '@/services/notifications';
+import { effectiveTopics } from '@/services/topics';
 import { PreferencesProvider, usePreferences } from '@/state/PreferencesContext';
 import { SubscriptionProvider, useSubscription } from '@/state/SubscriptionContext';
 import { refreshSebiWidget } from '@/widgets/widget-refresh';
@@ -66,8 +67,9 @@ function AppShell() {
     }
   }, [ready]);
 
-  // Keep the local notification schedule in sync with settings, goals and
-  // plan — refreshed on every app open so the 7-day horizon rolls forward.
+  // Keep the local notification schedule in sync with settings, goals,
+  // topics and plan — refreshed on every app open so the 7-day horizon
+  // rolls forward.
   useEffect(() => {
     if (!ready || !preferences.onboardingCompleted) return;
     void rescheduleNotifications({
@@ -77,12 +79,14 @@ function AppShell() {
       maxPerDay: isPremium
         ? PREMIUM_LIMITS.notificationsPerDay
         : FREE_LIMITS.notificationsPerDay,
+      topics: effectiveTopics('notification', preferences.topics, isPremium),
     });
   }, [
     ready,
     preferences.onboardingCompleted,
     preferences.notifications,
     preferences.profile,
+    preferences.topics,
     isPremium,
   ]);
 

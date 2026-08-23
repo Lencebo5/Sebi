@@ -164,7 +164,10 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   check('B: personalization change always regenerates', bSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
   check('B: current slot re-picked for the SAME date/period', bSlots[0].date === X.date && bSlots[0].period === X.period);
   check('B: current message differs from X (eligible alternatives exist)', bSlots[0].id !== X.id, `${bSlots[0].id} vs ${X.id}`);
-  check('B: new current message is a valid entitled pick', !!byId.get(bSlots[0].id) && !byId.get(bSlots[0].id).premium);
+  // v2-shape storage: widget topics fall back to goals, so B's premium goal
+  // categories (work_success, self_love) are legitimately eligible previews.
+  const entitledForB = (id) => !byId.get(id).premium || PROFILE_B.goals.includes(byId.get(id).category);
+  check('B: new current message is a valid entitled pick', !!byId.get(bSlots[0].id) && entitledForB(bSlots[0].id));
   const aIds = new Set(firstSlots.map((s) => s.id));
   const sharedWithA = bSlots.filter((s) => aIds.has(s.id)).length / bSlots.length;
   check('B: queue reflects the new profile (low overlap with A)', sharedWithA < 0.5, `${(sharedWithA * 100).toFixed(0)}% shared`);
@@ -183,8 +186,11 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   check('entitlement change regenerates', entSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
   check('entitlement change preserves the entitled current slot', entSlots[0].id === dSlots[0].id);
 
-  // Premium downgrade: a premium current slot must be re-picked as Free.
-  const premiumItem = AFFIRMATIONS.find((a) => a.premium && a.charCount <= SMALL_SAFE_CHARS);
+  // Premium downgrade: a premium current slot from an UNSELECTED category
+  // (not a goal/topic) must be re-picked as entitled content.
+  const premiumItem = AFFIRMATIONS.find(
+    (a) => a.premium && a.charCount <= SMALL_SAFE_CHARS && !PROFILE_B.goals.includes(a.category),
+  );
   const mirror = JSON.parse(memoryStore.get('danas.widget-queue.v1'));
   mirror.isPremium = true;
   mirror.slots[0] = { ...mirror.slots[0], id: premiumItem.id, text: premiumItem.text, tier: lengthTier(premiumItem.charCount) };
@@ -192,7 +198,7 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   memoryStore.set('danas.premium-cache.v1', JSON.stringify(false));
   const downgradedSlots = parse(await buildWidgetQueuePayload());
   check('premium downgrade triggers regeneration', downgradedSlots.length >= WIDGET_QUEUE_MIN_SLOTS);
-  check('downgrade re-picks the current slot as Free', downgradedSlots.length > 0 && downgradedSlots[0].id !== premiumItem.id && !byId.get(downgradedSlots[0].id).premium, downgradedSlots[0]?.id);
+  check('downgrade re-picks the current slot as entitled content', downgradedSlots.length > 0 && downgradedSlots[0].id !== premiumItem.id && entitledForB(downgradedSlots[0].id), downgradedSlots[0]?.id);
 
   // Content-version change forces regeneration.
   const mirror2 = JSON.parse(memoryStore.get('danas.widget-queue.v1'));
@@ -217,6 +223,80 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   check('refresh delivers the queue to native (setQueue -> immediate re-render)', refreshSrc.includes('storage.setQueue(payload)'));
   const layoutSrc = fs.readFileSync(path.join(ROOT, 'src/app/_layout.tsx'), 'utf8');
   check('app open uses the default maintenance reason', layoutSrc.includes('refreshSebiWidget()'));
+
+  // ── Preferences v3 migration, topic surfaces, notification opt-in ──────
+  console.log('\nPREFERENCES v3 MIGRATION + TOPIC SURFACES');
+  const { migratePreferences } = require(path.join(BUILD, 'services/preferences-migrate.js'));
+  const { effectiveTopics } = require(path.join(BUILD, 'services/topics.js'));
+  const { shouldShowNotificationOptIn } = require(path.join(BUILD, 'services/notification-optin.js'));
+
+  const v2Stored = {
+    version: 2,
+    onboardingCompleted: true,
+    themeId: 'terracotta',
+    notifications: { enabled: false, times: ['09:00'] },
+    profile: { goals: ['work_success', 'calm'], currentChallenges: ['self_criticism'], lifeContexts: ['career_business'], addressMode: 'neutral', deliveryStyle: 'mixed' },
+  };
+  const m2 = migratePreferences(v2Stored);
+  check('migration: v2 -> v3', m2.migrated === true && m2.prefs.version === 3);
+  check('migration: feed topics derived from goals, not customized',
+    JSON.stringify(m2.prefs.topics.feed.categoryIds) === JSON.stringify(['work_success', 'calm']) && m2.prefs.topics.feed.customized === false);
+  check('migration: widget + notifications start in follow_feed',
+    m2.prefs.topics.widget.mode === 'follow_feed' && m2.prefs.topics.notifications.mode === 'follow_feed');
+  check('migration: profile/theme/notifications preserved',
+    m2.prefs.profile.goals.length === 2 && m2.prefs.themeId === 'terracotta' && m2.prefs.notifications.times[0] === '09:00');
+  check('migration: opt-in prompt still pending (reminders off)', m2.prefs.notificationOptInPromptSeen === false);
+  const m2on = migratePreferences({ ...v2Stored, notifications: { enabled: true, times: ['09:00'] } });
+  check('migration: reminders already on -> opt-in never shown',
+    m2on.prefs.notificationOptInPromptSeen === true && shouldShowNotificationOptIn(m2on.prefs) === false);
+  const m1 = migratePreferences({ onboardingCompleted: true, goals: ['work', 'calm'], themeId: 'x' });
+  check('migration: v1 legacy renames goals and derives topics',
+    m1.prefs.version === 3 && m1.prefs.topics.feed.categoryIds.includes('work_success') && m1.prefs.topics.feed.categoryIds.includes('calm'));
+  const m3 = migratePreferences({ ...m2.prefs, topics: { ...m2.prefs.topics, feed: { categoryIds: ['work_success', 'nope', 'work_success'], customized: true } } });
+  check('migration: v3 passthrough sanitizes ids, keeps customized flag',
+    m3.migrated === false && JSON.stringify(m3.prefs.topics.feed.categoryIds) === JSON.stringify(['work_success']) && m3.prefs.topics.feed.customized === true);
+
+  check('opt-in gate: exactly the post-first-message conditions',
+    shouldShowNotificationOptIn(m2.prefs) === true &&
+    shouldShowNotificationOptIn({ ...m2.prefs, notificationOptInPromptSeen: true }) === false &&
+    shouldShowNotificationOptIn({ ...m2.prefs, onboardingCompleted: false }) === false &&
+    shouldShowNotificationOptIn({ ...m2.prefs, notifications: { enabled: true, times: [] } }) === false);
+
+  // Surface inheritance + Premium custom + downgrade preservation.
+  const topicState = {
+    feed: { categoryIds: ['calm', 'confidence'], customized: true },
+    widget: { mode: 'custom', categoryIds: ['gratitude'] },
+    notifications: { mode: 'follow_feed', categoryIds: [] },
+  };
+  check('widget custom (Premium) uses its own topics',
+    JSON.stringify(effectiveTopics('widget', topicState, true)) === JSON.stringify(['gratitude']));
+  check('widget custom while Free -> follows feed, custom picks preserved',
+    JSON.stringify(effectiveTopics('widget', topicState, false)) === JSON.stringify(['calm', 'confidence']) &&
+    topicState.widget.categoryIds[0] === 'gratitude');
+  check('notifications follow_feed inherits feed topics',
+    JSON.stringify(effectiveTopics('notification', topicState, true)) === JSON.stringify(['calm', 'confidence']));
+
+  // Widget queue honors the Free premium-topic preview end to end.
+  memoryStore.clear();
+  memoryStore.set('danas.preferences.v1', JSON.stringify({
+    version: 3,
+    onboardingCompleted: true,
+    themeId: 't',
+    notifications: { enabled: false, times: [] },
+    notificationOptInPromptSeen: true,
+    profile: { goals: ['work_success'], currentChallenges: ['self_criticism'], lifeContexts: ['career_business'], addressMode: 'neutral', deliveryStyle: 'mixed' },
+    topics: {
+      feed: { categoryIds: ['work_success'], customized: false },
+      widget: { mode: 'follow_feed', categoryIds: [] },
+      notifications: { mode: 'follow_feed', categoryIds: [] },
+    },
+  }));
+  memoryStore.set('danas.premium-cache.v1', JSON.stringify(false));
+  const previewSlots = parse(await buildWidgetQueuePayload());
+  check('widget queue (Free, work topic) includes work_success preview',
+    previewSlots.some((s) => byId.get(s.id).category === 'work_success'));
+  check('widget queue premium content limited to the selected topics',
+    previewSlots.every((s) => !byId.get(s.id).premium || byId.get(s.id).category === 'work_success'));
 
   runStaticChecks();
   runNativeTests();

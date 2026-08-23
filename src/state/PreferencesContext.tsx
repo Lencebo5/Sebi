@@ -15,100 +15,44 @@ import type {
   PersonalizationProfile,
   Preferences,
   StreakState,
+  SurfaceTopicSelection,
 } from '@/models/types';
 import { track } from '@/services/analytics';
 import { pushRecent } from '@/services/dailyContent';
+import {
+  DEFAULT_PREFERENCES,
+  DEFAULT_PROFILE,
+  migratePreferences,
+} from '@/services/preferences-migrate';
 import { readJson, StorageKeys, writeJson } from '@/services/storage';
 import { EMPTY_STREAK, registerActiveDay } from '@/services/streak';
-import { DEFAULT_THEME_ID, getTheme, type AppTheme } from '@/theme/themes';
+import {
+  DEFAULT_SURFACE_TOPICS,
+  sanitizeTopicIds,
+  toggleTopic,
+  topicsFromGoals,
+  type TopicToggleResult,
+} from '@/services/topics';
+import { getTheme, type AppTheme } from '@/theme/themes';
 import { tokensFor, type ThemeTokens } from '@/theme/tokens';
 import { refreshSebiWidget } from '@/widgets/widget-refresh';
 import { useSubscription } from '@/state/SubscriptionContext';
 
-export const DEFAULT_PROFILE: PersonalizationProfile = {
-  goals: [],
-  currentChallenges: [],
-  lifeContexts: [],
-  addressMode: 'neutral',
-  deliveryStyle: 'mixed',
-};
-
-const DEFAULT_PREFERENCES: Preferences = {
-  version: 2,
-  onboardingCompleted: false,
-  profile: DEFAULT_PROFILE,
-  themeId: DEFAULT_THEME_ID,
-  // Off by default: onboarding no longer configures reminders, and the
-  // permission prompt must not appear right after onboarding. Users enable
-  // reminders in Podešavanja → Podsetnici (which requests permission).
-  notifications: {
-    enabled: false,
-    times: ['08:00', '14:00', '20:00'],
-  },
-};
-
-/** Pre-personalization persisted shape (schema v1, had no `version` field). */
-interface LegacyPreferencesV1 {
-  onboardingCompleted?: boolean;
-  goals?: string[];
-  feelings?: string[];
-  themeId?: string;
-  notifications?: { enabled: boolean; times: string[] };
-}
-
-/** v1 category ids that were renamed to match the content pack. */
-const LEGACY_GOAL_MAP: Record<string, CategoryId> = {
-  work: 'work_success',
-  habits: 'healthy_habits',
-  sleep: 'bedtime',
-};
-
-const VALID_GOALS = new Set<string>([
-  'confidence',
-  'motivation',
-  'calm',
-  'self_love',
-  'work_success',
-  'money',
-  'relationships',
-  'healthy_habits',
-]);
+export { DEFAULT_PROFILE };
 
 /**
- * Migrate any stored preferences shape to schema v2. v1 users keep their
- * theme, notification settings and (renamed) goals; the new personalization
- * fields get the recommended defaults (neutral address, mixed style).
- * Completed onboarding stays completed — nobody is forced through the new
- * flow; everything is editable later in Settings.
+ * Goal → topic sync: while the user has never edited topics directly
+ * (customized=false), the preferred Za danas topics simply mirror their
+ * Goals. Once customized, goals and topics may diverge intentionally.
  */
-function migratePreferences(stored: unknown): { prefs: Preferences; migrated: boolean } {
-  if (stored == null || typeof stored !== 'object') {
-    return { prefs: DEFAULT_PREFERENCES, migrated: false };
-  }
-  const raw = stored as Partial<Preferences> & LegacyPreferencesV1;
-  if (raw.version === 2 && raw.profile) {
-    return {
-      prefs: {
-        ...DEFAULT_PREFERENCES,
-        ...raw,
-        profile: { ...DEFAULT_PROFILE, ...raw.profile },
-      } as Preferences,
-      migrated: false,
-    };
-  }
-  const legacyGoals = Array.isArray(raw.goals) ? raw.goals : [];
-  const goals = legacyGoals
-    .map((g) => LEGACY_GOAL_MAP[g] ?? (g as CategoryId))
-    .filter((g) => VALID_GOALS.has(g));
+function withSyncedTopics(prefs: Preferences): Preferences {
+  if (prefs.topics.feed.customized) return prefs;
   return {
-    prefs: {
-      version: 2,
-      onboardingCompleted: raw.onboardingCompleted ?? false,
-      profile: { ...DEFAULT_PROFILE, goals },
-      themeId: raw.themeId ?? DEFAULT_THEME_ID,
-      notifications: raw.notifications ?? DEFAULT_PREFERENCES.notifications,
+    ...prefs,
+    topics: {
+      ...prefs.topics,
+      feed: { categoryIds: topicsFromGoals(prefs.profile.goals), customized: false },
     },
-    migrated: true,
   };
 }
 
@@ -126,6 +70,14 @@ interface PreferencesContextValue {
   recentIds: string[];
   updatePreferences(patch: Partial<Preferences>): void;
   updateProfile(patch: Partial<PersonalizationProfile>): void;
+  /**
+   * Toggle a preferred Za danas topic (Categories UI). Marks topics as
+   * customized so goal changes stop syncing them. Returns 'limit' at the
+   * 5-topic cap and 'last' when the final topic cannot be removed.
+   */
+  toggleFeedTopic(category: CategoryId): TopicToggleResult;
+  /** Set the widget/notification topic selection (follow_feed or custom). */
+  setSurfaceTopics(surface: 'widget' | 'notifications', selection: SurfaceTopicSelection): void;
   /** Dev/testing: clear onboarding + profile so the flow can run again. */
   resetOnboarding(): void;
   /** Toggles a favorite; returns 'limit' when the free cap is hit. */
@@ -200,7 +152,9 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   const updatePreferences = useCallback((patch: Partial<Preferences>) => {
     setPreferences((prev) => {
-      const next = { ...prev, ...patch };
+      // Profile writes (onboarding completion) also initialize/sync the
+      // preferred feed topics from the chosen goals.
+      const next = withSyncedTopics({ ...prev, ...patch });
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
@@ -211,7 +165,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
 
   const updateProfile = useCallback((patch: Partial<PersonalizationProfile>) => {
     setPreferences((prev) => {
-      const next = { ...prev, profile: { ...prev.profile, ...patch } };
+      const next = withSyncedTopics({ ...prev, profile: { ...prev.profile, ...patch } });
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
@@ -223,6 +177,55 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
     refreshSebiWidget(affectsContent ? 'personalization' : 'maintenance');
   }, []);
 
+  const toggleFeedTopic = useCallback(
+    (category: CategoryId): TopicToggleResult => {
+      const { next, result } = toggleTopic(preferences.topics.feed.categoryIds, category);
+      if (result !== 'added' && result !== 'removed') return result;
+      const nextPrefs: Preferences = {
+        ...preferences,
+        topics: {
+          ...preferences.topics,
+          feed: { categoryIds: next, customized: true },
+        },
+      };
+      setPreferences(nextPrefs);
+      void writeJson(StorageKeys.preferences, nextPrefs);
+      track(result === 'added' ? 'feed_topic_selected' : 'feed_topic_removed', { category });
+      // Surfaces that follow the feed pick up the change: the widget queue
+      // regenerates now; notifications reschedule via the layout effect.
+      const widgetFollowsFeed = !(preferences.topics.widget.mode === 'custom' && isPremium);
+      if (widgetFollowsFeed) refreshSebiWidget('personalization');
+      return result;
+    },
+    [preferences, isPremium],
+  );
+
+  const setSurfaceTopics = useCallback(
+    (surface: 'widget' | 'notifications', selection: SurfaceTopicSelection) => {
+      const previous = preferences.topics[surface];
+      const clean: SurfaceTopicSelection = {
+        mode: selection.mode === 'custom' ? 'custom' : 'follow_feed',
+        categoryIds: sanitizeTopicIds(selection.categoryIds),
+      };
+      const nextPrefs: Preferences = {
+        ...preferences,
+        topics: { ...preferences.topics, [surface]: clean },
+      };
+      setPreferences(nextPrefs);
+      void writeJson(StorageKeys.preferences, nextPrefs);
+      if (previous.mode !== clean.mode) {
+        track(
+          surface === 'widget' ? 'widget_topic_mode_changed' : 'notification_topic_mode_changed',
+          { mode: clean.mode },
+        );
+      }
+      // Widget topics changed → regenerate the queue and re-render natively
+      // now; notification topics feed the reschedule effect in _layout.
+      if (surface === 'widget') refreshSebiWidget('personalization');
+    },
+    [preferences],
+  );
+
   const resetOnboarding = useCallback(() => {
     setPreferences((prev) => {
       const next: Preferences = {
@@ -230,6 +233,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
         onboardingCompleted: false,
         profile: DEFAULT_PROFILE,
         notifications: DEFAULT_PREFERENCES.notifications,
+        topics: DEFAULT_SURFACE_TOPICS,
+        notificationOptInPromptSeen: false,
       };
       void writeJson(StorageKeys.preferences, next);
       return next;
@@ -287,6 +292,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       recentIds,
       updatePreferences,
       updateProfile,
+      toggleFeedTopic,
+      setSurfaceTopics,
       resetOnboarding,
       toggleFavorite,
       isFavorite,
@@ -302,6 +309,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       recentIds,
       updatePreferences,
       updateProfile,
+      toggleFeedTopic,
+      setSurfaceTopics,
       resetOnboarding,
       toggleFavorite,
       isFavorite,

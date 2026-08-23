@@ -57,6 +57,7 @@ export default function Settings() {
   const rows: Row[] = [
     { label: 'Personalizacija', onPress: () => router.push('/settings/goals') },
     { label: 'Podsetnici', onPress: () => router.push('/settings/reminders') },
+    { label: 'Widget', onPress: () => router.push('/settings/widget-topics') },
     { label: 'Izgled', onPress: () => router.push('/settings/appearance') },
     {
       label: 'Sebi Premium',

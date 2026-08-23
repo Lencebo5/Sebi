@@ -1169,7 +1169,8 @@
       "charCount": 40,
       "personalization": {
         "needTags": [
-          "focus_attention"
+          "focus_attention",
+          "self_criticism"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -1919,7 +1920,8 @@
       "personalization": {
         "needTags": [
           "self_criticism",
-          "stress_overload"
+          "stress_overload",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "family_children",
@@ -2242,7 +2244,8 @@
       "personalization": {
         "needTags": [
           "self_criticism",
-          "stress_overload"
+          "stress_overload",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "family_children",
@@ -4489,7 +4492,8 @@
       "personalization": {
         "needTags": [
           "difficult_period",
-          "low_energy_motivation"
+          "low_energy_motivation",
+          "self_criticism"
         ],
         "lifeContextAffinity": [
           "major_change"
@@ -5258,7 +5262,8 @@
       "charCount": 37,
       "personalization": {
         "needTags": [
-          "focus_attention"
+          "focus_attention",
+          "self_criticism"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -6124,7 +6129,8 @@
       "personalization": {
         "needTags": [
           "focus_attention",
-          "low_energy_motivation"
+          "low_energy_motivation",
+          "self_criticism"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -6472,7 +6478,8 @@
       "charCount": 39,
       "personalization": {
         "needTags": [
-          "stress_overload"
+          "stress_overload",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "career_business",
@@ -9955,7 +9962,8 @@
       "charCount": 25,
       "personalization": {
         "needTags": [
-          "self_criticism"
+          "self_criticism",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "focus_on_self",
@@ -10035,7 +10043,8 @@
       "charCount": 44,
       "personalization": {
         "needTags": [
-          "self_criticism"
+          "self_criticism",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "focus_on_self",
@@ -10990,7 +10999,8 @@
       "personalization": {
         "needTags": [
           "focus_attention",
-          "low_energy_motivation"
+          "low_energy_motivation",
+          "self_criticism"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -13481,7 +13491,8 @@
       "personalization": {
         "needTags": [
           "self_criticism",
-          "stress_overload"
+          "stress_overload",
+          "low_energy_motivation"
         ],
         "lifeContextAffinity": [
           "family_children",
@@ -20013,7 +20024,8 @@
       "personalization": {
         "needTags": [
           "focus_attention",
-          "low_energy_motivation"
+          "low_energy_motivation",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [
           "family_children",
@@ -20413,7 +20425,8 @@
       "personalization": {
         "needTags": [
           "difficult_period",
-          "low_energy_motivation"
+          "low_energy_motivation",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [
           "focus_on_self"
@@ -29725,7 +29738,8 @@
       "charCount": 57,
       "personalization": {
         "needTags": [
-          "self_criticism"
+          "self_criticism",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [
           "focus_on_self"
@@ -32537,7 +32551,8 @@
       "personalization": {
         "needTags": [
           "emotional_overwhelm",
-          "self_criticism"
+          "self_criticism",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [
           "career_business",
@@ -34756,7 +34771,8 @@
       "personalization": {
         "needTags": [
           "self_criticism",
-          "stress_overload"
+          "stress_overload",
+          "difficult_period"
         ],
         "lifeContextAffinity": [
           "student_early_career"
@@ -53957,7 +53973,9 @@
         "targeted_personalization_v2"
       ],
       "personalization": {
-        "needTags": [],
+        "needTags": [
+          "low_energy_motivation"
+        ],
         "lifeContextAffinity": [
           "family_children"
         ],
@@ -54163,7 +54181,9 @@
         "targeted_personalization_v2"
       ],
       "personalization": {
-        "needTags": [],
+        "needTags": [
+          "low_energy_motivation"
+        ],
         "lifeContextAffinity": [
           "family_children"
         ],
@@ -54447,7 +54467,9 @@
         "targeted_personalization_v2"
       ],
       "personalization": {
-        "needTags": [],
+        "needTags": [
+          "low_energy_motivation"
+        ],
         "lifeContextAffinity": [
           "family_children"
         ],
@@ -59922,7 +59944,8 @@
       ],
       "personalization": {
         "needTags": [
-          "focus_attention"
+          "focus_attention",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -60112,7 +60135,8 @@
       ],
       "personalization": {
         "needTags": [
-          "focus_attention"
+          "focus_attention",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],
@@ -60606,7 +60630,8 @@
       ],
       "personalization": {
         "needTags": [
-          "focus_attention"
+          "focus_attention",
+          "worry_overthinking"
         ],
         "lifeContextAffinity": [],
         "ageAffinity": [],

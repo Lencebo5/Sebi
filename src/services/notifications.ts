@@ -2,7 +2,7 @@ import Constants, { ExecutionEnvironment } from 'expo-constants';
 import { Platform } from 'react-native';
 
 import { APP_NAME, NOTIFICATION_HORIZON_DAYS } from '@/constants/appConfig';
-import type { NotificationSettings, PersonalizationProfile } from '@/models/types';
+import type { CategoryId, NotificationSettings, PersonalizationProfile } from '@/models/types';
 import { notificationAffirmation } from '@/services/dailyContent';
 import { parseTime } from '@/services/dates';
 
@@ -69,6 +69,8 @@ export interface ScheduleInput {
   isPremium: boolean;
   /** Plan-dependent cap on times per day. */
   maxPerDay: number;
+  /** Effective reminder topics (services/topics.ts) — one set for all reminders. */
+  topics: CategoryId[];
 }
 
 /**
@@ -80,6 +82,7 @@ export async function rescheduleNotifications({
   profile,
   isPremium,
   maxPerDay,
+  topics,
 }: ScheduleInput): Promise<void> {
   const Notifications = await native();
   if (!Notifications) return;
@@ -108,7 +111,7 @@ export async function rescheduleNotifications({
       fireDate.setHours(time.hour, time.minute, 0, 0);
       if (fireDate.getTime() <= now.getTime() + 60_000) continue;
 
-      const affirmation = notificationAffirmation(profile, isPremium, fireDate, usedIds);
+      const affirmation = notificationAffirmation(profile, isPremium, fireDate, usedIds, topics);
       usedIds.push(affirmation.id);
       scheduled.push(
         Notifications.scheduleNotificationAsync({

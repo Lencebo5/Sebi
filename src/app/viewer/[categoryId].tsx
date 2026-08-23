@@ -6,6 +6,7 @@ import { getAffirmation } from '@/content/affirmations';
 import { CATEGORIES } from '@/content/categories';
 import type { Affirmation, CategoryId } from '@/models/types';
 import { buildCategoryFeed, buildTodayFeed } from '@/services/dailyContent';
+import { effectiveTopics } from '@/services/topics';
 import { usePreferences } from '@/state/PreferencesContext';
 import { useSubscription } from '@/state/SubscriptionContext';
 
@@ -16,7 +17,7 @@ import { useSubscription } from '@/state/SubscriptionContext';
 export default function Viewer() {
   const router = useRouter();
   const { categoryId, start } = useLocalSearchParams<{ categoryId: string; start?: string }>();
-  const { profile, favorites, recentIds } = usePreferences();
+  const { profile, preferences, favorites, recentIds } = usePreferences();
   const { isPremium } = useSubscription();
 
   const feed: Affirmation[] = useMemo(() => {
@@ -27,7 +28,12 @@ export default function Viewer() {
         .reverse();
     }
     if (categoryId === 'today') {
-      return buildTodayFeed(profile, isPremium, recentIds);
+      return buildTodayFeed(
+        profile,
+        isPremium,
+        recentIds,
+        effectiveTopics('personalized_feed', preferences.topics, isPremium),
+      );
     }
     const known = CATEGORIES.some((c) => c.id === categoryId);
     if (!known) return [];

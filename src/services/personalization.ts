@@ -29,6 +29,13 @@ export function periodForHour(hour: number): DayPeriod {
 export interface ScoringContext {
   profile: PersonalizationProfile;
   period: DayPeriod;
+  /**
+   * The surface's explicit preferred topics (schema v3). Together with the
+   * profile goals these form CATEGORY INTENT: a category matches intent
+   * when it is a selected goal OR a preferred topic — scored ONCE, never
+   * double-counted when both name the same category.
+   */
+  preferredCategories?: readonly string[];
 }
 
 // ── Signal weights (scoring doc §Suggested score) ──
@@ -42,6 +49,7 @@ export interface ScoringContext {
 // A tie at 8 lets goal content interleave while challenges stay the
 // strongest signal overall (they stack per tag and cover more corpus).
 export const SIGNAL_WEIGHTS = {
+  /** CATEGORY INTENT: selected goal OR explicit preferred topic — once. */
   goal: 8,
   challengePerTag: 8, // per matching needTag — strongest signal
   lifeContext: 3,
@@ -93,8 +101,12 @@ export function baseScore(a: Affirmation, ctx: ScoringContext): number {
   const p = a.personalization;
   let score = 0;
 
-  const matchesGoal = profile.goals.includes(a.category);
-  if (matchesGoal) score += SIGNAL_WEIGHTS.goal;
+  // Category intent: goal OR preferred topic, counted exactly once even
+  // when the same category is both a goal and an explicitly selected topic.
+  const matchesIntent =
+    profile.goals.includes(a.category) ||
+    (ctx.preferredCategories?.includes(a.category) ?? false);
+  if (matchesIntent) score += SIGNAL_WEIGHTS.goal;
 
   let matchesChallenge = false;
   for (const challenge of profile.currentChallenges) {
@@ -109,11 +121,13 @@ export function baseScore(a: Affirmation, ctx: ScoringContext): number {
 
   // Intersection bonuses: matching several signal TYPES at once outranks a
   // generic single-signal match (each type counts once, however many tags
-  // matched within it).
-  if (matchesGoal && matchesChallenge) score += SYNERGY_WEIGHTS.goalChallenge;
-  if (matchesGoal && matchesContext) score += SYNERGY_WEIGHTS.goalContext;
+  // matched within it). Category intent — goal or preferred topic — is one
+  // type, so a manually selected topic earns the same synergy a goal does,
+  // and an identical goal+topic never earns it twice.
+  if (matchesIntent && matchesChallenge) score += SYNERGY_WEIGHTS.goalChallenge;
+  if (matchesIntent && matchesContext) score += SYNERGY_WEIGHTS.goalContext;
   if (matchesChallenge && matchesContext) score += SYNERGY_WEIGHTS.challengeContext;
-  if (matchesGoal && matchesChallenge && matchesContext) score += SYNERGY_WEIGHTS.allThree;
+  if (matchesIntent && matchesChallenge && matchesContext) score += SYNERGY_WEIGHTS.allThree;
 
   if (profile.ageRange && p.ageAffinity.includes(profile.ageRange)) score += AGE_BOOST;
 
@@ -207,6 +221,8 @@ export interface OrderOptions {
   recentIds?: string[];
   /** Extra ids to treat as already shown (e.g. within one notification batch). */
   exclude?: string[];
+  /** Surface preferred topics forming category intent (see ScoringContext). */
+  preferredCategories?: readonly string[];
   /**
    * How many items to order via personalized selection. Defaults to the
    * WHOLE pool — personalization never switches off partway through a
@@ -250,7 +266,11 @@ export function orderFeed(
   options: OrderOptions,
 ): Affirmation[] {
   const rng = options.rng ?? Math.random;
-  const ctx: ScoringContext = { profile, period: options.period };
+  const ctx: ScoringContext = {
+    profile,
+    period: options.period,
+    preferredCategories: options.preferredCategories,
+  };
   const count = Math.min(items.length, options.personalizedCount ?? items.length);
 
   let scored = items
