@@ -12,12 +12,12 @@ export const StorageKeys = {
   mockPremium: 'danas.mock-premium.v1',
   /** CONTENT_SCHEMA_VERSION the stored favorites/recents were written for. */
   contentVersion: 'danas.content-version.v1',
-  /** Last resolved premium entitlement — read by the headless widget task. */
+  /** Last resolved premium entitlement — read by the widget queue builder. */
   premiumCache: 'danas.premium-cache.v1',
   /** Widget-only impression history — NEVER mixed with app recent history. */
   widgetRecentIds: 'danas.widget-recent-ids.v1',
-  /** Current widget selection: { dateKey, period, id } for period stability. */
-  widgetState: 'danas.widget-state.v1',
+  /** JS mirror of the queue delivered to the native widget (staleness checks). */
+  widgetQueue: 'danas.widget-queue.v1',
 } as const;
 
 export type StorageKey = (typeof StorageKeys)[keyof typeof StorageKeys];

@@ -1,80 +1,145 @@
-const { withAndroidManifest, withDangerousMod } = require('expo/config-plugins');
+const { withAndroidManifest, withDangerousMod, withMainApplication } = require('expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 /**
- * Sebi-specific fixes on top of the react-native-android-widget plugin.
+ * Sebi native Android widget — the whole widget, no widget library.
  *
- * 1. The library declares the AppWidget receiver android:exported="false";
- *    the canonical Android sample exports it and some OEM launchers omit
- *    non-exported providers from the widget picker. APPWIDGET_UPDATE is a
- *    protected system broadcast, so exporting adds no attack surface.
+ * The widget is a plain AppWidgetProvider over RemoteViews TextViews. The
+ * app's personalization engine precomputes a queue of future messages and
+ * writes it to SharedPreferences through a tiny native module; the provider
+ * rotates through it natively (no JS, no bitmaps, no ContentProvider).
  *
- * 2. The library's initialLayout (@layout/rn_widget) is fully transparent,
- *    so a widget that has not rendered yet is invisible. Replace it with a
- *    simple native Linen surface with a quiet "Sebi" wordmark — the user
- *    must never see a fully transparent widget. The library always draws
- *    updates through its own RemoteViews layout, so this only affects the
- *    pre-first-render state.
- *
- * ORDERING: config mods execute in REVERSE plugin-array order, so this
- * plugin must be listed BEFORE react-native-android-widget in app.json to
- * run after it. Verified via prebuild.
+ * This plugin wires the checked-in sources under native/android/sebi-widget
+ * into the prebuilt project:
+ *   1. copies Java sources into app/src/main/java/com/sebi/app/widget/
+ *   2. copies layouts / drawables / provider XML / strings into res/
+ *   3. copies the widget picker preview image into res/drawable-nodpi/
+ *   4. declares the receiver in AndroidManifest (exported=true — some OEM
+ *      launchers omit non-exported providers from the widget picker;
+ *      APPWIDGET_UPDATE is a protected broadcast, so this adds no surface)
+ *   5. registers SebiWidgetPackage in MainApplication.kt (fails the build
+ *      loudly if the template anchor is missing — a silently unregistered
+ *      bridge would break queue delivery)
  */
 
-const INITIAL_LAYOUT = `<?xml version="1.0" encoding="utf-8"?>
-<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:background="@drawable/sebi_widget_initial_bg">
+// Resolved against the Expo project root (provided by the prebuild mod
+// request) so the plugin works regardless of the process working directory.
+const nativeDir = (projectRoot) => path.join(projectRoot, 'native', 'android', 'sebi-widget');
+const previewSource = (projectRoot) => path.join(projectRoot, 'assets', 'widget-preview', 'sebi.png');
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="center"
-        android:text="Sebi"
-        android:textColor="#733A342B"
-        android:textSize="15sp"
-        android:fontFamily="serif" />
-</FrameLayout>
-`;
+const JAVA_FILES = [
+  'SebiWidgetLogic.java',
+  'SebiWidgetProvider.java',
+  'SebiWidgetStorageModule.java',
+  'SebiWidgetPackage.java',
+];
 
-const INITIAL_BG = `<?xml version="1.0" encoding="utf-8"?>
-<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
-    <solid android:color="#F6F1E7" />
-    <corners android:radius="24dp" />
-</shape>
-`;
+const RES_FILES = [
+  'layout/sebi_widget_small.xml',
+  'layout/sebi_widget_medium.xml',
+  'drawable/sebi_widget_bg_morning.xml',
+  'drawable/sebi_widget_bg_linen.xml',
+  'drawable/sebi_widget_bg_paper.xml',
+  'drawable/sebi_widget_bg_night.xml',
+  'xml/sebi_widget_info.xml',
+  'values/sebi_widget_strings.xml',
+];
+
+function copyNativeSources(projectRoot, platformProjectRoot) {
+  const javaDir = path.join(platformProjectRoot, 'app/src/main/java/com/sebi/app/widget');
+  fs.mkdirSync(javaDir, { recursive: true });
+  for (const file of JAVA_FILES) {
+    const source = path.join(nativeDir(projectRoot), 'java', file);
+    if (!fs.existsSync(source)) {
+      throw new Error(`[withSebiWidget] missing native source: ${source}`);
+    }
+    fs.copyFileSync(source, path.join(javaDir, file));
+  }
+
+  const resDir = path.join(platformProjectRoot, 'app/src/main/res');
+  for (const file of RES_FILES) {
+    const source = path.join(nativeDir(projectRoot), 'res', file);
+    if (!fs.existsSync(source)) {
+      throw new Error(`[withSebiWidget] missing native resource: ${source}`);
+    }
+    const target = path.join(resDir, file);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.copyFileSync(source, target);
+  }
+
+  const preview = previewSource(projectRoot);
+  if (!fs.existsSync(preview)) {
+    throw new Error(`[withSebiWidget] missing widget preview image: ${preview}`);
+  }
+  const previewDir = path.join(resDir, 'drawable-nodpi');
+  fs.mkdirSync(previewDir, { recursive: true });
+  fs.copyFileSync(preview, path.join(previewDir, 'sebi_widget_preview.png'));
+}
+
+function addReceiver(androidManifest) {
+  const application = androidManifest.manifest.application?.[0];
+  if (!application) {
+    throw new Error('[withSebiWidget] AndroidManifest has no <application>');
+  }
+  application.receiver = (application.receiver ?? []).filter(
+    (receiver) => receiver.$?.['android:name'] !== '.widget.SebiWidgetProvider',
+  );
+  application.receiver.push({
+    $: {
+      'android:name': '.widget.SebiWidgetProvider',
+      'android:exported': 'true',
+      'android:label': 'Sebi',
+    },
+    'intent-filter': [
+      {
+        action: [{ $: { 'android:name': 'android.appwidget.action.APPWIDGET_UPDATE' } }],
+      },
+    ],
+    'meta-data': [
+      {
+        $: {
+          'android:name': 'android.appwidget.provider',
+          'android:resource': '@xml/sebi_widget_info',
+        },
+      },
+    ],
+  });
+  return androidManifest;
+}
+
+const PACKAGE_LINE = 'add(com.sebi.app.widget.SebiWidgetPackage())';
+const PACKAGE_ANCHOR = '// add(MyReactNativePackage())';
+
+function registerPackage(mainApplication) {
+  if (mainApplication.includes(PACKAGE_LINE)) return mainApplication;
+  if (!mainApplication.includes(PACKAGE_ANCHOR)) {
+    throw new Error(
+      '[withSebiWidget] could not find the package-list anchor in MainApplication.kt — ' +
+        'the template changed; SebiWidgetPackage would not be registered.',
+    );
+  }
+  return mainApplication.replace(PACKAGE_ANCHOR, `${PACKAGE_ANCHOR}\n          ${PACKAGE_LINE}`);
+}
 
 module.exports = function withSebiWidget(config) {
   config = withAndroidManifest(config, (mod) => {
-    const application = mod.modResults.manifest.application?.[0];
-    for (const receiver of application?.receiver ?? []) {
-      const name = receiver.$['android:name'] ?? '';
-      if (name.endsWith('.widget.Sebi')) {
-        receiver.$['android:exported'] = 'true';
-      }
+    mod.modResults = addReceiver(mod.modResults);
+    return mod;
+  });
+
+  config = withMainApplication(config, (mod) => {
+    if (mod.modResults.language !== 'kt') {
+      throw new Error('[withSebiWidget] expected a Kotlin MainApplication');
     }
+    mod.modResults.contents = registerPackage(mod.modResults.contents);
     return mod;
   });
 
   config = withDangerousMod(config, [
     'android',
     (mod) => {
-      const resDir = path.join(mod.modRequest.platformProjectRoot, 'app/src/main/res');
-      fs.mkdirSync(path.join(resDir, 'layout'), { recursive: true });
-      fs.mkdirSync(path.join(resDir, 'drawable'), { recursive: true });
-      fs.writeFileSync(path.join(resDir, 'layout', 'sebi_widget_initial.xml'), INITIAL_LAYOUT);
-      fs.writeFileSync(path.join(resDir, 'drawable', 'sebi_widget_initial_bg.xml'), INITIAL_BG);
-
-      const providerXmlPath = path.join(resDir, 'xml', 'widgetprovider_sebi.xml');
-      if (fs.existsSync(providerXmlPath)) {
-        const xml = fs.readFileSync(providerXmlPath, 'utf8');
-        fs.writeFileSync(
-          providerXmlPath,
-          xml.replace('android:initialLayout="@layout/rn_widget"', 'android:initialLayout="@layout/sebi_widget_initial"'),
-        );
-      }
+      copyNativeSources(mod.modRequest.projectRoot, mod.modRequest.platformProjectRoot);
       return mod;
     },
   ]);

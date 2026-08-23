@@ -3,8 +3,9 @@ import { pickOne, type DayPeriod } from '@/services/personalization';
 
 /**
  * Pure widget content selection — no storage, no React, no native modules —
- * so the verification script can exercise it directly. The headless service
- * (widget-content.ts) wires it to persisted state.
+ * so the verification script can exercise it directly. The queue generator
+ * (widget-queue.ts) wires it into precomputed slots for the native widget;
+ * time-of-day surfaces are decided natively (SebiWidgetProvider).
  *
  * The widget reuses the production personalization engine unchanged (same
  * goals / challenges / life-context / age / delivery-style / time-of-day
@@ -16,15 +17,6 @@ import { pickOne, type DayPeriod } from '@/services/personalization';
 export const SMALL_SAFE_CHARS = 78;
 /** Messages safely renderable in the 4×2 widget at the 19.5–17 tiers. */
 export const MEDIUM_SAFE_CHARS = 125;
-
-export type WidgetSurface = 'morning' | 'linen' | 'paper' | 'night';
-
-export interface WidgetDisplay {
-  affirmation: Affirmation;
-  /** Serbian display label — never an internal category id. */
-  label: string;
-  surface: WidgetSurface;
-}
 
 /** Free/premium eligibility mirrors the app's category-level model. */
 export function eligibleWidgetPool(
@@ -68,26 +60,16 @@ export function widgetLabel(affirmation: Affirmation): string {
   return 'ZA DANAS';
 }
 
-/** Time-of-day surface treatment (design ref 1f): a state, not a widget. */
-export function widgetSurface(period: DayPeriod): WidgetSurface {
-  if (period === 'morning') return 'morning';
-  if (period === 'day') return 'linen';
-  if (period === 'evening') return 'paper';
-  return 'night';
-}
+export type LengthTier = 'short' | 'mid' | 'long' | 'xl';
 
 /**
- * Deterministic typography tiers from message length (design §6/16):
- * never clip, never ellipsize, never shrink below readable.
+ * Deterministic length tier (design §6/16): the native widget maps this to
+ * fixed sp sizes (small 17/16/15/14.5, medium 20/19/18/17) — never clipped,
+ * never ellipsized. Breakpoints mirror SebiWidgetLogic.tierForLength.
  */
-export function affirmationTier(
-  charCount: number,
-  layout: 'small' | 'medium',
-): { fontSize: number; lineHeight: number } {
-  if (layout === 'small') {
-    const fontSize = charCount <= 45 ? 16 : charCount <= 62 ? 15 : 14;
-    return { fontSize, lineHeight: Math.round(fontSize * 1.38) };
-  }
-  const fontSize = charCount <= 45 ? 20 : charCount <= 62 ? 19 : charCount <= 95 ? 18 : 17;
-  return { fontSize, lineHeight: Math.round(fontSize * 1.36) };
+export function lengthTier(charCount: number): LengthTier {
+  if (charCount <= 45) return 'short';
+  if (charCount <= 62) return 'mid';
+  if (charCount <= 95) return 'long';
+  return 'xl';
 }

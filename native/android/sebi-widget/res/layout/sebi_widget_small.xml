@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sebi 2×2 widget (design ref 1b, Papir). RemoteViews-compatible views only.
+  This layout is ALSO the provider's initialLayout: the android:text defaults
+  below are a real Free corpus message, so the widget is functional (label +
+  quote + brand) even before the first provider update. Runtime updates
+  always overwrite text, size and background.
+  No android:ellipsize anywhere — messages are length-constrained upstream.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/sebi_widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/sebi_widget_bg_paper">
+
+    <TextView
+        android:id="@+id/sebi_widget_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ZA DANAS"
+        android:textSize="10sp"
+        android:textColor="#803A342B"
+        android:letterSpacing="0.16"
+        android:fontFamily="sans-serif-medium" />
+
+    <TextView
+        android:id="@+id/sebi_widget_quote"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:layout_marginTop="6dp"
+        android:layout_marginBottom="6dp"
+        android:gravity="center_vertical"
+        android:text="Ne mora sve da bude gotovo da bi dan bio dobar."
+        android:textSize="16sp"
+        android:textColor="#3A342B"
+        android:lineSpacingMultiplier="1.32"
+        android:fontFamily="serif" />
+
+    <TextView
+        android:id="@+id/sebi_widget_brand"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Sebi"
+        android:textSize="11sp"
+        android:textColor="#733A342B"
+        android:fontFamily="serif" />
+</LinearLayout>

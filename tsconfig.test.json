@@ -15,8 +15,7 @@
     "src/content/categories.ts",
     "src/content/affirmations.ts",
     "src/services/storage.ts",
-    "src/widgets/SebiWidget.tsx",
-    "src/widgets/widget-content.ts",
-    "src/widgets/widget-task-handler.tsx"
+    "src/widgets/widget-queue.ts",
+    "src/widgets/widget-content.ts"
   ]
 }

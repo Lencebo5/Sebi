@@ -204,7 +204,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
-    if (patch.profile || patch.onboardingCompleted !== undefined) refreshSebiWidget();
+    if (patch.profile || patch.onboardingCompleted !== undefined) refreshSebiWidget({ force: true });
   }, []);
 
   const updateProfile = useCallback((patch: Partial<PersonalizationProfile>) => {
@@ -214,7 +214,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       return next;
     });
     // The home-screen widget personalizes from the same profile.
-    refreshSebiWidget();
+    refreshSebiWidget({ force: true });
   }, []);
 
   const resetOnboarding = useCallback(() => {

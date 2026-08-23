@@ -24,7 +24,6 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.2",
-    "react-native-android-widget": "^0.22.1",
     "react-native-gesture-handler": "~2.32.0",
     "react-native-purchases": "^10.7.2",
     "react-native-reanimated": "4.5.1",
@@ -40,7 +39,6 @@
     "@types/react": "~19.2.2",
     "eslint": "^9.39.5",
     "eslint-config-expo": "^57.0.1",
-    "patch-package": "^8.0.1",
     "typescript": "~6.0.3"
   },
   "scripts": {
@@ -51,8 +49,7 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "verify:personalization": "tsc -p tsconfig.test.json && node scripts/verify-personalization.js",
-    "postinstall": "patch-package",
-    "verify:widget": "tsc -p tsconfig.test.json && node scripts/verify-widget-handler.js"
+    "verify:widget": "tsc -p tsconfig.test.json && node scripts/verify-widget.js"
   },
   "private": true
 }

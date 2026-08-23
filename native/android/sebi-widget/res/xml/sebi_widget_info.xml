@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sebi widget provider metadata. One adaptive provider: default 4×2 (Linen),
+  resizable down to 2×2 (Papir) — the provider switches layouts natively in
+  onAppWidgetOptionsChanged. initialLayout is the real small layout with a
+  baked-in Free fallback message, so the widget is functional from the very
+  first moment, before any provider update runs.
+  updatePeriodMillis=1800000 (the 30-minute OS minimum) keeps period
+  boundaries (morning/day/evening/night) at most half an hour late with no
+  WorkManager, no alarms and no JS wake-ups.
+-->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal"
+    android:widgetCategory="home_screen"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/sebi_widget_small"
+    android:previewImage="@drawable/sebi_widget_preview"
+    android:description="@string/sebi_widget_description" />

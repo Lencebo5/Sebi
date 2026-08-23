@@ -1,35 +1,40 @@
-import { AFFIRMATIONS, getAffirmation } from '@/content/affirmations';
+import { AFFIRMATIONS, CONTENT_SCHEMA_VERSION, getAffirmation } from '@/content/affirmations';
 import type { PersonalizationProfile, Preferences } from '@/models/types';
-import { periodForHour, type DayPeriod } from '@/services/personalization';
+import { periodForHour } from '@/services/personalization';
 import { readJson, StorageKeys, writeJson } from '@/services/storage';
 import {
-  eligibleWidgetPool,
-  selectWidgetAffirmation,
-  widgetLabel,
-  widgetSurface,
-  type WidgetDisplay,
-} from '@/widgets/widget-select';
+  generateWidgetQueue,
+  isoDate,
+  WIDGET_QUEUE_MIN_SLOTS,
+  type WidgetQueueSlot,
+} from '@/widgets/widget-queue';
+import { SMALL_SAFE_CHARS } from '@/widgets/widget-select';
 
 /**
- * Headless widget content service. Runs in the widget task (no React tree,
- * no app context) and reads persisted state directly.
+ * Widget queue orchestrator: reads persisted app state (profile, premium
+ * entitlement, widget impression history), decides whether the queue needs
+ * regenerating, and produces the JSON payload the native bridge stores in
+ * SharedPreferences.
  *
- * Widget viewing is passive: this service keeps its OWN small impression
- * history (`widgetRecentIds`, last 20) and NEVER touches the app's recent
- * history, favorites, streak or feed state.
- *
- * Selection is period-stable: one message per local time period (morning /
- * day / evening / night — ~3–4 changes per day). Repeated Android update
- * ticks inside the same period re-render the same message.
+ * Only widget-scoped keys are ever written (widgetRecentIds, widgetQueue) —
+ * the widget never mutates app recents, favorites, streak or feed state.
  */
 
-const WIDGET_HISTORY_SIZE = 20;
-
-interface WidgetState {
-  dateKey: string;
-  period: DayPeriod;
-  id: string;
+/** JS-side mirror of the last delivered queue, for staleness checks. */
+export interface WidgetQueueMirror {
+  version: 1;
+  generatedAt: number;
+  contentVersion: number;
+  isPremium: boolean;
+  slots: WidgetQueueSlot[];
 }
+
+/** Regenerate when the queue is older than this even if slots remain. */
+const REGEN_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
+/** Regenerate when fewer future slots than this remain (~2 days). */
+const REGEN_MIN_FUTURE_SLOTS = 8;
+
+const PERIOD_RANK: Record<string, number> = { morning: 0, day: 1, evening: 2, night: 3 };
 
 const DEFAULT_PROFILE: PersonalizationProfile = {
   goals: [],
@@ -38,10 +43,6 @@ const DEFAULT_PROFILE: PersonalizationProfile = {
   addressMode: 'neutral',
   deliveryStyle: 'mixed',
 };
-
-function dateKeyOf(now: Date): string {
-  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
-}
 
 async function readProfile(): Promise<PersonalizationProfile> {
   const prefs = await readJson<Partial<Preferences> | null>(StorageKeys.preferences, null);
@@ -53,48 +54,96 @@ async function readProfile(): Promise<PersonalizationProfile> {
   return DEFAULT_PROFILE;
 }
 
-export async function getWidgetDisplay(now: Date = new Date()): Promise<WidgetDisplay> {
-  const period = periodForHour(now.getHours());
-  const surface = widgetSurface(period);
-
-  try {
-    const [profile, isPremium, recent, state] = await Promise.all([
-      readProfile(),
-      readJson<boolean>(StorageKeys.premiumCache, false),
-      readJson<string[]>(StorageKeys.widgetRecentIds, []),
-      readJson<WidgetState | null>(StorageKeys.widgetState, null),
-    ]);
-
-    // Same day + same period → keep the current message (never show a
-    // removed/invalid id after a content migration).
-    if (state && state.dateKey === dateKeyOf(now) && state.period === period) {
-      const existing = getAffirmation(state.id);
-      if (existing && (isPremium || !existing.premium)) {
-        return { affirmation: existing, label: widgetLabel(existing), surface };
-      }
-    }
-
-    const picked = selectWidgetAffirmation(AFFIRMATIONS, profile, period, recent, isPremium);
-    if (!picked) return fallbackDisplay(surface);
-
-    const nextRecent = [...recent.filter((id) => id !== picked.id), picked.id].slice(
-      -WIDGET_HISTORY_SIZE,
-    );
-    void writeJson(StorageKeys.widgetRecentIds, nextRecent);
-    void writeJson(StorageKeys.widgetState, {
-      dateKey: dateKeyOf(now),
-      period,
-      id: picked.id,
-    } satisfies WidgetState);
-
-    return { affirmation: picked, label: widgetLabel(picked), surface };
-  } catch {
-    // Storage hiccup — still show a valid Sebi message, never a blank box.
-    return fallbackDisplay(surface);
-  }
+function slotKey(date: string, period: string): string {
+  return `${date}#${PERIOD_RANK[period] ?? -1}`;
 }
 
-function fallbackDisplay(surface: WidgetDisplay['surface']): WidgetDisplay {
-  const safe = eligibleWidgetPool(AFFIRMATIONS, false)[0];
-  return { affirmation: safe, label: widgetLabel(safe), surface };
+function futureSlotCount(slots: WidgetQueueSlot[], now: Date): number {
+  const nowKey = slotKey(isoDate(now), periodForHour(now.getHours()));
+  return slots.filter((slot) => slotKey(slot.date, slot.period) >= nowKey).length;
+}
+
+/**
+ * The message currently on the home screen stays stable across
+ * regenerations within its period — unless it is no longer valid (content
+ * migration) or no longer entitled (premium lapsed).
+ */
+function preservedCurrentSlot(
+  mirror: WidgetQueueMirror | null,
+  isPremium: boolean,
+  now: Date,
+): WidgetQueueSlot | null {
+  if (!mirror || !Array.isArray(mirror.slots)) return null;
+  const date = isoDate(now);
+  const period = periodForHour(now.getHours());
+  const slot = mirror.slots.find((s) => s.date === date && s.period === period);
+  if (!slot) return null;
+  const affirmation = getAffirmation(slot.id);
+  if (!affirmation || affirmation.text !== slot.text) return null;
+  if (!isPremium && affirmation.premium) return null;
+  if (affirmation.charCount > SMALL_SAFE_CHARS) return null;
+  return slot;
+}
+
+/**
+ * Build the queue payload for the native widget, or return null when the
+ * stored queue is still fresh and regeneration was not forced.
+ *
+ * Forced regeneration (personalization change, premium change, onboarding
+ * completion) always rebuilds; unforced calls (app open) rebuild only when
+ * the queue is missing, low, old, from another content version, or from a
+ * different entitlement state.
+ */
+export async function buildWidgetQueuePayload(
+  options: { force?: boolean } = {},
+  now: Date = new Date(),
+): Promise<string | null> {
+  const [profile, isPremium, recent, mirror] = await Promise.all([
+    readProfile(),
+    readJson<boolean>(StorageKeys.premiumCache, false),
+    readJson<string[]>(StorageKeys.widgetRecentIds, []),
+    readJson<WidgetQueueMirror | null>(StorageKeys.widgetQueue, null),
+  ]);
+
+  const fresh =
+    mirror != null &&
+    mirror.version === 1 &&
+    Array.isArray(mirror.slots) &&
+    mirror.contentVersion === CONTENT_SCHEMA_VERSION &&
+    mirror.isPremium === isPremium &&
+    now.getTime() - mirror.generatedAt < REGEN_MAX_AGE_MS &&
+    futureSlotCount(mirror.slots, now) >= REGEN_MIN_FUTURE_SLOTS;
+  if (fresh && !options.force) return null;
+
+  const preserved = preservedCurrentSlot(mirror, isPremium, now);
+  const seed = preserved
+    ? [...recent.filter((id) => id !== preserved.id), preserved.id]
+    : recent;
+
+  const generated = generateWidgetQueue(AFFIRMATIONS, profile, isPremium, seed, now);
+  let slots = generated.slots;
+  if (preserved) {
+    slots = [
+      preserved,
+      ...slots.filter((s) => !(s.date === preserved.date && s.period === preserved.period)),
+    ];
+  }
+  if (slots.length < WIDGET_QUEUE_MIN_SLOTS) {
+    // Should be impossible (the Free pool alone is hundreds of messages) —
+    // keep whatever the native side already has rather than degrading it.
+    console.error(`[SEBI_WIDGET] queue generation underflow: ${slots.length} slots`);
+    if (slots.length === 0) return null;
+  }
+
+  const nextMirror: WidgetQueueMirror = {
+    version: 1,
+    generatedAt: now.getTime(),
+    contentVersion: CONTENT_SCHEMA_VERSION,
+    isPremium,
+    slots,
+  };
+  await writeJson(StorageKeys.widgetQueue, nextMirror);
+  await writeJson(StorageKeys.widgetRecentIds, generated.recentIds);
+
+  return JSON.stringify(slots);
 }

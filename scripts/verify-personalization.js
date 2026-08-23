@@ -179,19 +179,18 @@ const {
   eligibleWidgetPool,
   selectWidgetAffirmation,
   widgetLabel,
-  widgetSurface,
-  affirmationTier,
+  lengthTier,
   SMALL_SAFE_CHARS,
 } = require('../.test-build/widgets/widget-select.js');
 
 console.log('\nWIDGET CHECKS');
 // Fit: whole corpus currently fits the small widget's safe budget.
 check('all 1609 messages fit the small widget budget', ITEMS.every((a) => a.charCount <= SMALL_SAFE_CHARS));
-// Tiers never leave the readable range and shrink monotonically.
-const tierSizes = [10, 30, 46, 63, 76, 96, 140].map((c) => affirmationTier(c, 'small').fontSize);
-check('small tiers within 14–16 and monotonic', tierSizes.every((s) => s >= 14 && s <= 16) && tierSizes.every((s, i, arr) => i === 0 || s <= arr[i - 1]));
-const medSizes = [10, 30, 46, 63, 76, 96, 140].map((c) => affirmationTier(c, 'medium').fontSize);
-check('medium tiers within 17–20 and monotonic', medSizes.every((s) => s >= 17 && s <= 20) && medSizes.every((s, i, arr) => i === 0 || s <= arr[i - 1]));
+// Length tiers (mapped to fixed native sp sizes) grow monotonically.
+const TIER_RANK = { short: 0, mid: 1, long: 2, xl: 3 };
+const tiers = [10, 30, 46, 63, 76, 96, 140].map((c) => lengthTier(c));
+check('length tiers valid and monotonic', tiers.every((t) => t in TIER_RANK) && tiers.every((t, i, arr) => i === 0 || TIER_RANK[t] >= TIER_RANK[arr[i - 1]]));
+check('length tier breakpoints', lengthTier(45) === 'short' && lengthTier(46) === 'mid' && lengthTier(62) === 'mid' && lengthTier(63) === 'long' && lengthTier(95) === 'long' && lengthTier(96) === 'xl');
 
 // Free users: pool never contains premium categories.
 const freePool = eligibleWidgetPool(ITEMS, false);
@@ -238,7 +237,8 @@ const sampleMorning = ITEMS.find((a) => a.category === 'morning');
 const sampleBedtime = ITEMS.find((a) => a.category === 'bedtime');
 const sampleCalm = ITEMS.find((a) => a.category === 'calm');
 check('labels map to Serbian display text', widgetLabel(sampleMorning) === 'DOBRO JUTRO' && widgetLabel(sampleBedtime) === 'PRED SPAVANJE' && widgetLabel(sampleCalm) === 'ZA DANAS');
-check('surfaces map per design 1f', widgetSurface('morning') === 'morning' && widgetSurface('day') === 'linen' && widgetSurface('evening') === 'paper' && widgetSurface('night') === 'night');
+// Time-of-day surfaces (design 1f) are decided natively now — the mapping
+// is verified statically against SebiWidgetProvider.java by verify-widget.
 
 console.log(`\nWIDGET+CORE: ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECKS FAILED'}`);
 process.exitCode = failures === 0 ? 0 : 1;
