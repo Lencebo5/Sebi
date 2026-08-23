@@ -262,6 +262,54 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
     shouldShowNotificationOptIn({ ...m2.prefs, onboardingCompleted: false }) === false &&
     shouldShowNotificationOptIn({ ...m2.prefs, notifications: { enabled: true, times: [] } }) === false);
 
+  // ── 1.3.1: first-reminder timing + decision-based prompt semantics ─────
+  console.log('\nNOTIFICATION OPT-IN 1.3.1');
+  const { planFirstOptInReminder } = require(path.join(BUILD, 'services/notification-optin.js'));
+  const at = (h, min) => new Date(2026, 7, 24, h, min);
+  const planA = planFirstOptInReminder(at(7, 0), ['08:00']);
+  check('A: 07:00 with 08:00 slot -> no special first reminder', planA.sameDay === false && planA.fireDate === null);
+  const planB = planFirstOptInReminder(at(15, 0), ['08:00']);
+  check('B: 15:00 with 08:00 slot -> one-time reminder at 16:30 (+90min)',
+    planB.sameDay === true && planB.fireDate.getHours() === 16 && planB.fireDate.getMinutes() === 30 && planB.fireDate.getDate() === 24);
+  const planC = planFirstOptInReminder(at(22, 30), ['08:00']);
+  check('C: 22:30 -> no late-night reminder (21:30 cutoff, tomorrow normal)', planC.sameDay === false && planC.fireDate === null);
+  check('cutoff boundary: exactly 21:30 allowed, one minute later skipped',
+    planFirstOptInReminder(at(20, 0), ['08:00']).sameDay === true &&
+    planFirstOptInReminder(at(20, 1), ['08:00']).sameDay === false);
+  check('midnight crossing never schedules', planFirstOptInReminder(at(23, 30), ['08:00']).sameDay === false);
+  check('I: an upcoming slot today suppresses the special reminder (no duplicates)',
+    planFirstOptInReminder(at(15, 0), ['08:00', '20:00']).sameDay === false &&
+    planFirstOptInReminder(at(7, 30), ['08:00']).sameDay === false);
+  check('malformed times fall through to the same-day plan safely',
+    planFirstOptInReminder(at(15, 0), ['nonsense']).sameDay === true);
+
+  const optInSrc = fs.readFileSync(path.join(ROOT, 'src/components/NotificationOptIn.tsx'), 'utf8');
+  const showEffect = optInSrc.slice(optInSrc.indexOf('useEffect('), optInSrc.indexOf('const markHandled'));
+  check('E: showing the sheet does NOT persist promptSeen',
+    showEffect.length > 0 && !showEffect.includes('notificationOptInPromptSeen') && !showEffect.includes('markHandled'));
+  const declineBody = optInSrc.slice(optInSrc.indexOf('const decline'), optInSrc.indexOf('dismissWithoutDecision'));
+  check('D: decline marks handled and never requests OS permission',
+    declineBody.includes('markHandled()') && !declineBody.includes('requestNotificationPermission'));
+  check('F: enable marks handled even when permission is denied',
+    optInSrc.indexOf('markHandled(); // explicit decision') < optInSrc.indexOf('if (!granted)') &&
+    optInSrc.indexOf('markHandled(); // explicit decision') > 0);
+  check('F: denied permission schedules nothing and keeps reminders off',
+    optInSrc.indexOf('if (!granted)') < optInSrc.indexOf('requestFirstOptInReminder(plan.fireDate)'));
+  check('back button closes without consuming the prompt; backdrop is inert',
+    optInSrc.includes('onRequestClose={dismissWithoutDecision}') && !optInSrc.includes('<Pressable style={styles.backdrop}'));
+  check('opt-in uses the plan-capped effective times', optInSrc.includes('times.slice(0, maxPerDay)'));
+  check('first-scheduled analytics carries same_day only',
+    optInSrc.includes("track('notification_optin_first_scheduled', { same_day: plan.sameDay })"));
+
+  const notifSrc = fs.readFileSync(path.join(ROOT, 'src/services/notifications.ts'), 'utf8');
+  check('G: permission request is a no-op when already granted',
+    notifSrc.includes('if (current.granted) return true;'));
+  check('I: rebuild consumes the one-time marker after cancelAll (no stale leftovers)',
+    notifSrc.indexOf('cancelAllScheduledNotificationsAsync') < notifSrc.indexOf('pendingFirstReminder;') &&
+    notifSrc.includes('pendingFirstReminder = null;'));
+  check('first reminder uses the personalized selector with topics',
+    /firstReminder, usedIds, topics/.test(notifSrc));
+
   // Surface inheritance + Premium custom + downgrade preservation.
   const topicState = {
     feed: { categoryIds: ['calm', 'confidence'], customized: true },

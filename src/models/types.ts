@@ -206,6 +206,7 @@ export interface AnalyticsEventMap {
   notification_optin_shown: undefined;
   notification_optin_enabled: undefined;
   notification_optin_declined: undefined;
+  notification_optin_first_scheduled: { same_day: boolean };
   notification_enabled: { times: number };
   paywall_viewed: { source: string };
   subscription_started: { plan: string };

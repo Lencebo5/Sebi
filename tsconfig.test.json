@@ -18,6 +18,7 @@
     "src/services/topics.ts",
     "src/services/preferences-migrate.ts",
     "src/services/notification-optin.ts",
+    "src/services/dates.ts",
     "src/theme/themes.ts",
     "src/widgets/widget-queue.ts",
     "src/widgets/widget-content.ts"

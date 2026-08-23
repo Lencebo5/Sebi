@@ -63,6 +63,20 @@ export async function requestNotificationPermission(): Promise<boolean> {
   return next.granted;
 }
 
+/**
+ * One-shot handoff from the post-first-message opt-in (see
+ * NotificationOptIn): the NEXT schedule rebuild appends a single same-day
+ * personalized reminder at this date. Living INSIDE the rebuild keeps the
+ * existing rescheduling logic authoritative: the cancelAll at the top can
+ * never leave it stale, every rebuild consumes the marker exactly once,
+ * and disabling reminders or changing settings drops it naturally.
+ */
+let pendingFirstReminder: Date | null = null;
+
+export function requestFirstOptInReminder(fireDate: Date): void {
+  pendingFirstReminder = fireDate;
+}
+
 export interface ScheduleInput {
   settings: NotificationSettings;
   profile: PersonalizationProfile;
@@ -88,6 +102,10 @@ export async function rescheduleNotifications({
   if (!Notifications) return;
 
   await Notifications.cancelAllScheduledNotificationsAsync();
+  // Consume the opt-in first-reminder marker on EVERY rebuild — a disabled
+  // or permission-less rebuild simply drops it (no stale one-time reminder).
+  const firstReminder = pendingFirstReminder;
+  pendingFirstReminder = null;
   if (!settings.enabled || settings.times.length === 0) return;
 
   // Never request permission from this background sync — the system prompt
@@ -128,6 +146,28 @@ export async function rescheduleNotifications({
         }),
       );
     }
+  }
+
+  // One-time same-day reminder right after the opt-in (Case B only — the
+  // plan already guarantees no normal slot fires today). Same personalized
+  // selector, same topics and entitlement, excluded from repeating within
+  // this batch like every other slot.
+  if (firstReminder && firstReminder.getTime() > now.getTime() + 60_000) {
+    const affirmation = notificationAffirmation(profile, isPremium, firstReminder, usedIds, topics);
+    scheduled.push(
+      Notifications.scheduleNotificationAsync({
+        content: {
+          title: APP_NAME,
+          body: affirmation.text,
+          data: { affirmationId: affirmation.id },
+          sound: false,
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: firstReminder,
+        },
+      }),
+    );
   }
   await Promise.all(scheduled);
 }

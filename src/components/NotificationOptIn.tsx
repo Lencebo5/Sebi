@@ -1,27 +1,45 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { PrimaryButton } from '@/components/PrimaryButton';
 import { useToast } from '@/components/Toast';
+import { FREE_LIMITS, PREMIUM_LIMITS } from '@/constants/appConfig';
 import { track } from '@/services/analytics';
-import { requestNotificationPermission } from '@/services/notifications';
-import { shouldShowNotificationOptIn } from '@/services/notification-optin';
+import {
+  requestFirstOptInReminder,
+  requestNotificationPermission,
+} from '@/services/notifications';
+import {
+  planFirstOptInReminder,
+  shouldShowNotificationOptIn,
+} from '@/services/notification-optin';
 import { usePreferences } from '@/state/PreferencesContext';
+import { useSubscription } from '@/state/SubscriptionContext';
 import { fonts, radius, spacing } from '@/theme/tokens';
 
 /** How long after the first Za danas message is visible the prompt appears. */
 const PROMPT_DELAY_MS = 1800;
 
 /**
- * Post-first-message reminder opt-in (task Phase 2). Shown ONCE, on the
- * Danas screen, only after onboarding is complete and the first
- * personalized message is already visible — never during onboarding, never
- * when reminders are already enabled, and never again after "Ne sada"
- * (Podešavanja → Podsetnici stays available). The OS permission dialog is
- * requested exclusively from the explicit CTA tap.
+ * Post-first-message reminder opt-in (1.3.1 semantics). Shown on the Danas
+ * screen only after onboarding is complete and the first personalized
+ * message is already visible — never during onboarding and never when
+ * reminders are already enabled.
+ *
+ * `notificationOptInPromptSeen` is persisted ONLY on an explicit decision
+ * ("Uključi dnevni podsetnik" — including a permission denial — or
+ * "Ne sada"). Backgrounding, killing the app or the Android back button
+ * leave the prompt eligible for a later visit. The backdrop deliberately
+ * does not dismiss: "Ne sada" is the one clear, non-coercive exit.
+ *
+ * Enabling applies first-reminder timing (services/notification-optin.ts):
+ * if today's normal slot already passed, a one-time personalized reminder
+ * lands ~90 minutes from now (never after 21:30 local) — delivered through
+ * the normal reschedule pipeline, so no duplicates and no stale leftovers.
  */
 export function NotificationOptIn() {
   const { tokens, preferences, updatePreferences } = usePreferences();
+  const { isPremium } = useSubscription();
   const { showToast } = useToast();
   const [visible, setVisible] = useState(false);
   const shownRef = useRef(false);
@@ -31,42 +49,58 @@ export function NotificationOptIn() {
   useEffect(() => {
     if (!eligible || shownRef.current) return;
     const timer = setTimeout(() => {
+      // Once per screen visit; NOT persisted — only a decision persists.
       shownRef.current = true;
       setVisible(true);
       track('notification_optin_shown');
-      // Persist immediately: the prompt appears once, ever.
-      updatePreferences({ notificationOptInPromptSeen: true });
     }, PROMPT_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [eligible, updatePreferences]);
+  }, [eligible]);
+
+  const markHandled = () => updatePreferences({ notificationOptInPromptSeen: true });
 
   const enable = async () => {
     setVisible(false);
+    // No-op system prompt when permission is already granted — the service
+    // early-returns on granted and only asks the OS when it may.
     const granted = await requestNotificationPermission();
-    if (granted) {
-      // Free plan: effectively one reminder/day (the schedule caps times);
-      // the default times keep 08:00 first — changeable in Podsetnici.
-      updatePreferences({ notifications: { ...preferences.notifications, enabled: true } });
-      track('notification_optin_enabled');
-      showToast('Dnevni podsetnik je uključen.');
-    } else {
+    markHandled(); // explicit decision, whatever the OS answered
+    if (!granted) {
+      // Reminders stay off; Podešavanja → Podsetnici remains the retry path.
       showToast('Obaveštenja možeš uključiti u podešavanjima telefona.');
+      return;
     }
+    const maxPerDay = isPremium
+      ? PREMIUM_LIMITS.notificationsPerDay
+      : FREE_LIMITS.notificationsPerDay;
+    const plan = planFirstOptInReminder(
+      new Date(),
+      preferences.notifications.times.slice(0, maxPerDay),
+    );
+    if (plan.fireDate) requestFirstOptInReminder(plan.fireDate);
+    track('notification_optin_first_scheduled', { same_day: plan.sameDay });
+    track('notification_optin_enabled');
+    // Enabling triggers the normal reschedule (layout effect), which owns
+    // the whole schedule — including the one-time first reminder above.
+    updatePreferences({ notifications: { ...preferences.notifications, enabled: true } });
+    showToast('Dnevni podsetnik je uključen.');
   };
 
   const decline = () => {
     setVisible(false);
+    markHandled();
     track('notification_optin_declined');
   };
+
+  /** Android back button: close WITHOUT consuming the prompt. */
+  const dismissWithoutDecision = () => setVisible(false);
 
   if (!visible) return null;
 
   return (
-    <Modal transparent animationType="fade" onRequestClose={decline}>
-      <Pressable style={styles.backdrop} onPress={decline}>
-        <Pressable
-          style={[styles.sheet, { backgroundColor: tokens.surface }]}
-          onPress={(e) => e.stopPropagation()}>
+    <Modal transparent animationType="fade" onRequestClose={dismissWithoutDecision}>
+      <View style={styles.backdrop}>
+        <View style={[styles.sheet, { backgroundColor: tokens.surface }]}>
           <Text style={[styles.title, { color: tokens.ink }]}>
             Želiš jednu Sebi poruku svakog dana?
           </Text>
@@ -75,8 +109,8 @@ export function NotificationOptIn() {
           <Pressable accessibilityRole="button" onPress={decline} hitSlop={8}>
             <Text style={[styles.decline, { color: tokens.sub }]}>Ne sada</Text>
           </Pressable>
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
