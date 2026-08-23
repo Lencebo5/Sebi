@@ -23,6 +23,7 @@ import {
 } from '@/services/notifications';
 import { PreferencesProvider, usePreferences } from '@/state/PreferencesContext';
 import { SubscriptionProvider, useSubscription } from '@/state/SubscriptionContext';
+import { refreshSebiWidget } from '@/widgets/widget-refresh';
 
 SplashScreen.preventAutoHideAsync();
 configureNotificationHandling();
@@ -57,7 +58,12 @@ function AppShell() {
   const { isPremium } = useSubscription();
 
   useEffect(() => {
-    if (ready) SplashScreen.hideAsync();
+    if (ready) {
+      SplashScreen.hideAsync();
+      // Once per app open: after storage/content migrations settle, give any
+      // placed home-screen widget a chance to catch up.
+      refreshSebiWidget();
+    }
   }, [ready]);
 
   // Keep the local notification schedule in sync with settings, goals and

@@ -2,7 +2,7 @@
   "expo": {
     "name": "Sebi",
     "slug": "sebi",
-    "version": "1.0.2",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "sebi",
@@ -41,6 +41,29 @@
         "expo-notifications",
         {
           "defaultChannel": "default"
+        }
+      ],
+      [
+        "react-native-android-widget",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/literata/400Regular/Literata_400Regular.ttf",
+            "./node_modules/@expo-google-fonts/schibsted-grotesk/600SemiBold/SchibstedGrotesk_600SemiBold.ttf"
+          ],
+          "widgets": [
+            {
+              "name": "Sebi",
+              "label": "Sebi",
+              "description": "Jedna dobra misao na početnom ekranu.",
+              "minWidth": "110dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal",
+              "updatePeriodMillis": 14400000,
+              "previewImage": "./assets/widget-preview/sebi.png"
+            }
+          ]
         }
       ]
     ],

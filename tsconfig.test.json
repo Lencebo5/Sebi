@@ -7,5 +7,10 @@
     "module": "commonjs",
     "target": "es2020"
   },
-  "include": ["src/services/personalization.ts", "src/models/types.ts"]
+  "include": [
+    "src/services/personalization.ts",
+    "src/models/types.ts",
+    "src/widgets/widget-select.ts",
+    "src/content/categories.ts"
+  ]
 }

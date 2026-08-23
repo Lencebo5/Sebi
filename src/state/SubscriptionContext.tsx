@@ -10,6 +10,8 @@ import React, {
 import type { PlanOffering, SubscriptionPlan } from '@/models/types';
 import { track } from '@/services/analytics';
 import { createPurchasesAdapter } from '@/services/purchases';
+import { StorageKeys, writeJson } from '@/services/storage';
+import { refreshSebiWidget } from '@/widgets/widget-refresh';
 
 interface SubscriptionContextValue {
   ready: boolean;
@@ -38,6 +40,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
         if (cancelled) return;
         setIsPremium(premium);
         setOfferings(plans);
+        // The headless widget task can't query the store — cache entitlement.
+        void writeJson(StorageKeys.premiumCache, premium);
       } catch (error) {
         if (__DEV__) console.warn('[purchases] init failed', error);
       } finally {
@@ -54,6 +58,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     if (active) {
       setIsPremium(true);
       track('subscription_started', { plan });
+      void writeJson(StorageKeys.premiumCache, true);
+      refreshSebiWidget();
     }
     return active;
   }, [adapter]);
@@ -63,6 +69,8 @@ export function SubscriptionProvider({ children }: { children: React.ReactNode }
     if (active) {
       setIsPremium(true);
       track('subscription_restored');
+      void writeJson(StorageKeys.premiumCache, true);
+      refreshSebiWidget();
     }
     return active;
   }, [adapter]);

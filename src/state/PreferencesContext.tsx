@@ -22,6 +22,7 @@ import { readJson, StorageKeys, writeJson } from '@/services/storage';
 import { EMPTY_STREAK, registerActiveDay } from '@/services/streak';
 import { DEFAULT_THEME_ID, getTheme, type AppTheme } from '@/theme/themes';
 import { tokensFor, type ThemeTokens } from '@/theme/tokens';
+import { refreshSebiWidget } from '@/widgets/widget-refresh';
 import { useSubscription } from '@/state/SubscriptionContext';
 
 export const DEFAULT_PROFILE: PersonalizationProfile = {
@@ -203,6 +204,7 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
+    if (patch.profile || patch.onboardingCompleted !== undefined) refreshSebiWidget();
   }, []);
 
   const updateProfile = useCallback((patch: Partial<PersonalizationProfile>) => {
@@ -211,6 +213,8 @@ export function PreferencesProvider({ children }: { children: React.ReactNode })
       void writeJson(StorageKeys.preferences, next);
       return next;
     });
+    // The home-screen widget personalizes from the same profile.
+    refreshSebiWidget();
   }, []);
 
   const resetOnboarding = useCallback(() => {

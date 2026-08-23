@@ -163,5 +163,82 @@ check('targeted_v2 content appears naturally (18-24 student profile)', tHits.len
 const tCatFeed = orderFeed(ITEMS.filter((a) => a.category === 'confidence'), profileT, { period: 'day', recentIds: [], rng: mulberry32(12) });
 check('category feed stays inside its category', tCatFeed.every((a) => a.category === 'confidence'), `${tCatFeed.length} items`);
 
-console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECKS FAILED'}`);
-process.exit(failures === 0 ? 0 : 1);
+
+// ── Android widget selection (src/widgets/widget-select.ts) ──────────────
+// The compiled test build keeps the app's `@/` path alias — resolve it here.
+const Module = require('module');
+const path = require('path');
+const origResolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...args) {
+  if (typeof request === 'string' && request.startsWith('@/')) {
+    return origResolve.call(this, path.resolve('.test-build', request.slice(2)), ...args);
+  }
+  return origResolve.call(this, request, ...args);
+};
+const {
+  eligibleWidgetPool,
+  selectWidgetAffirmation,
+  widgetLabel,
+  widgetSurface,
+  affirmationTier,
+  SMALL_SAFE_CHARS,
+} = require('../.test-build/widgets/widget-select.js');
+
+console.log('\nWIDGET CHECKS');
+// Fit: whole corpus currently fits the small widget's safe budget.
+check('all 1609 messages fit the small widget budget', ITEMS.every((a) => a.charCount <= SMALL_SAFE_CHARS));
+// Tiers never leave the readable range and shrink monotonically.
+const tierSizes = [10, 30, 46, 63, 76, 96, 140].map((c) => affirmationTier(c, 'small').fontSize);
+check('small tiers within 14–16 and monotonic', tierSizes.every((s) => s >= 14 && s <= 16) && tierSizes.every((s, i, arr) => i === 0 || s <= arr[i - 1]));
+const medSizes = [10, 30, 46, 63, 76, 96, 140].map((c) => affirmationTier(c, 'medium').fontSize);
+check('medium tiers within 17–20 and monotonic', medSizes.every((s) => s >= 17 && s <= 20) && medSizes.every((s, i, arr) => i === 0 || s <= arr[i - 1]));
+
+// Free users: pool never contains premium categories.
+const freePool = eligibleWidgetPool(ITEMS, false);
+check('widget free pool has no premium categories', freePool.every((a) => !PREMIUM_CATEGORIES.has(a.category)));
+check('widget free pool is large enough', freePool.length > 500, `${freePool.length}`);
+
+// Profiles A and B produce measurably different widget selections.
+const draw = (profile, seed, n, period) => {
+  const seen = [];
+  const rng = mulberry32(seed);
+  for (let i = 0; i < n; i++) {
+    const a = selectWidgetAffirmation(ITEMS, profile, period, seen.slice(-20), true, rng);
+    seen.push(a.id);
+  }
+  return seen;
+};
+const aDraws = new Set(draw(PROFILES.A.profile, 5, 40, 'day'));
+const bDraws = new Set(draw(PROFILES.B.profile, 5, 40, 'day'));
+const overlap = [...aDraws].filter((id) => bDraws.has(id)).length / aDraws.size;
+check('profiles A vs B widget selections differ', overlap < 0.3, `overlap ${(overlap * 100).toFixed(0)}%`);
+
+// Widget-only history is honored (no repeats within the window).
+const seq = draw(PROFILES.A.profile, 9, 21, 'day');
+const withinWindow = seq.some((id, i) => seq.slice(Math.max(0, i - 20), i).includes(id));
+check('widget history prevents repeats within 20', !withinWindow);
+
+// Time of day: for a neutral profile (fresh widget user, pre-onboarding)
+// morning surfaces morning content and night surfaces bedtime content.
+// Strong challenge signals may legitimately outweigh time-of-day for
+// profiles like D (difficult_period) — that is intended engine behavior.
+const neutralProfile = { goals: [], currentChallenges: [], lifeContexts: [], addressMode: 'neutral', deliveryStyle: 'mixed' };
+const morningDraws = draw(neutralProfile, 3, 30, 'morning');
+const nightDraws = draw(neutralProfile, 3, 30, 'night');
+const dayDraws = draw(neutralProfile, 3, 30, 'day');
+const mCat = morningDraws.filter((id) => id.startsWith('morning_')).length;
+const bCat = nightDraws.filter((id) => id.startsWith('bedtime_')).length;
+const mAtDay = dayDraws.filter((id) => id.startsWith('morning_')).length;
+check('morning widget draws include morning content (neutral)', mCat > 0, `${mCat}/30`);
+check('night widget draws include bedtime content (neutral)', bCat > 0, `${bCat}/30`);
+check('morning content likelier in the morning than midday', mCat > mAtDay, `${mCat} vs ${mAtDay}`);
+
+// Labels: Serbian display text only, never internal ids.
+const sampleMorning = ITEMS.find((a) => a.category === 'morning');
+const sampleBedtime = ITEMS.find((a) => a.category === 'bedtime');
+const sampleCalm = ITEMS.find((a) => a.category === 'calm');
+check('labels map to Serbian display text', widgetLabel(sampleMorning) === 'DOBRO JUTRO' && widgetLabel(sampleBedtime) === 'PRED SPAVANJE' && widgetLabel(sampleCalm) === 'ZA DANAS');
+check('surfaces map per design 1f', widgetSurface('morning') === 'morning' && widgetSurface('day') === 'linen' && widgetSurface('evening') === 'paper' && widgetSurface('night') === 'night');
+
+console.log(`\nWIDGET+CORE: ${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECKS FAILED'}`);
+process.exitCode = failures === 0 ? 0 : 1;
