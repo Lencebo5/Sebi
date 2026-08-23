@@ -5,12 +5,18 @@
     "outDir": ".test-build",
     "rootDir": "src",
     "module": "commonjs",
-    "target": "es2020"
+    "target": "es2020",
+    "jsx": "react-jsx"
   },
   "include": [
     "src/services/personalization.ts",
     "src/models/types.ts",
     "src/widgets/widget-select.ts",
-    "src/content/categories.ts"
+    "src/content/categories.ts",
+    "src/content/affirmations.ts",
+    "src/services/storage.ts",
+    "src/widgets/SebiWidget.tsx",
+    "src/widgets/widget-content.ts",
+    "src/widgets/widget-task-handler.tsx"
   ]
 }

@@ -107,14 +107,44 @@ export function SebiWidget({
   );
 }
 
-/** Rendered when even the safe fallbacks fail — never a blank box. */
+/**
+ * Last-resort render when the production path throws — deliberately free of
+ * every failure-prone dependency: no AsyncStorage, no personalization, no
+ * custom fonts, no gradient. Solid Linen, system font, one approved Free
+ * message (corpus id motivation_001). It must be nearly impossible for this
+ * not to render — the user must never see a transparent widget.
+ */
 export function SebiWidgetFallback({ layout }: { layout: 'small' | 'medium' }) {
+  const small = layout === 'small';
   return (
-    <SebiWidget
-      layout={layout}
-      surface="linen"
-      label="ZA DANAS"
-      text="Dovoljno je da napravim sledeći korak."
-    />
+    <FlexWidget
+      clickAction="OPEN_APP"
+      accessibilityLabel="Sebi. Raspoloženje nije uslov da počnem."
+      style={{
+        height: 'match_parent',
+        width: 'match_parent',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        padding: small ? 16 : 20,
+        borderRadius: 24,
+        backgroundColor: '#F6F1E7',
+      }}>
+      <TextWidget
+        text="ZA DANAS"
+        style={{ fontSize: 9, letterSpacing: 1.8, color: '#8A857C', marginBottom: 8 }}
+      />
+      <TextWidget
+        text="Raspoloženje nije uslov da počnem."
+        style={{
+          fontSize: small ? 15 : 18,
+          lineHeight: small ? 21 : 25,
+          color: INK,
+          textAlign: 'left',
+          width: 'match_parent',
+        }}
+      />
+      <FlexWidget style={{ flex: 1, width: 'match_parent' }} />
+      <TextWidget text="Sebi" style={{ fontSize: small ? 10.5 : 11, color: '#938D82' }} />
+    </FlexWidget>
   );
 }

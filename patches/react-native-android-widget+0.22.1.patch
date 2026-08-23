@@ -1,0 +1,96 @@
+diff --git a/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidget.java b/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidget.java
+index 5650d1e..bce1939 100644
+--- a/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidget.java
++++ b/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidget.java
+@@ -4,6 +4,8 @@ import android.app.PendingIntent;
+ import android.appwidget.AppWidgetManager;
+ import android.content.ComponentName;
+ import android.content.Intent;
++import android.content.pm.PackageManager;
++import android.content.pm.ResolveInfo;
+ import android.graphics.Bitmap;
+ import android.graphics.Canvas;
+ import android.graphics.Rect;
+@@ -148,7 +150,30 @@ public class RNWidget {
+     private Uri saveBitmapToDisk(int widgetId, String mode, Bitmap bitmap) {
+         String fileName = "widget_" + widgetId + "_mode_" + mode + ".png";
+         RNWidgetImageProvider.writeImage(appContext, fileName, bitmap);
+-        return RNWidgetImageProvider.getImageUri(appContext, fileName);
++        Uri uri = RNWidgetImageProvider.getImageUri(appContext, fileName);
++        grantUriReadToWidgetHosts(uri);
++        return uri;
++    }
++
++    // PATCH (Sebi): some OEM launchers fail to load widget images from an
++    // exported content provider without an explicit URI grant, leaving the
++    // widget transparent. Home/launcher apps are visible by default under
++    // Android 11+ package-visibility rules, so grant each of them read
++    // access to the freshly written image URI.
++    private void grantUriReadToWidgetHosts(Uri uri) {
++        try {
++            Intent homeIntent = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME);
++            List<ResolveInfo> homes = appContext.getPackageManager()
++                .queryIntentActivities(homeIntent, PackageManager.MATCH_ALL);
++            for (ResolveInfo info : homes) {
++                if (info.activityInfo != null) {
++                    appContext.grantUriPermission(
++                        info.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
++                }
++            }
++        } catch (Exception e) {
++            e.printStackTrace();
++        }
+     }
+ 
+     @RequiresApi(Build.VERSION_CODES.N)
+diff --git a/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidgetImageProvider.java b/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidgetImageProvider.java
+index 0f963f0..340b869 100644
+--- a/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidgetImageProvider.java
++++ b/node_modules/react-native-android-widget/android/src/main/java/com/reactnativeandroidwidget/RNWidgetImageProvider.java
+@@ -4,9 +4,11 @@ import android.content.ContentProvider;
+ import android.content.ContentValues;
+ import android.content.Context;
+ import android.database.Cursor;
++import android.database.MatrixCursor;
+ import android.graphics.Bitmap;
+ import android.net.Uri;
+ import android.os.ParcelFileDescriptor;
++import android.provider.OpenableColumns;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+ 
+@@ -54,8 +56,33 @@ public class RNWidgetImageProvider extends ContentProvider {
+     }
+ 
+     // --- Boilerplate required for ContentProvider ---
++    // PATCH (Sebi): some OEM AppWidget hosts (notably Samsung's launcher)
++    // query image metadata before opening the stream; returning null makes
++    // them treat the widget image as missing and the widget renders fully
++    // transparent. Answer with a valid OpenableColumns cursor instead.
+     @Nullable @Override
+-    public Cursor query(@NonNull Uri uri, @Nullable String[] projection, @Nullable String selection, @Nullable String[] selectionArgs, @Nullable String sortOrder) { return null; }
++    public Cursor query(@NonNull Uri uri, @Nullable String[] projection, @Nullable String selection, @Nullable String[] selectionArgs, @Nullable String sortOrder) {
++        String fileName = uri.getLastPathSegment();
++        if (fileName == null) {
++            return null;
++        }
++        File file = new File(getFolderWithImages(getContext()), fileName.replaceAll("\\?.*", ""));
++        String[] columns = projection != null
++            ? projection
++            : new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE};
++        MatrixCursor cursor = new MatrixCursor(columns, 1);
++        MatrixCursor.RowBuilder row = cursor.newRow();
++        for (String column : columns) {
++            if (OpenableColumns.DISPLAY_NAME.equals(column)) {
++                row.add(file.getName());
++            } else if (OpenableColumns.SIZE.equals(column)) {
++                row.add(file.exists() ? file.length() : 0L);
++            } else {
++                row.add(null);
++            }
++        }
++        return cursor;
++    }
+     @Nullable @Override
+     public String getType(@NonNull Uri uri) { return "image/png"; } // Assume PNGs
+     @Nullable @Override
