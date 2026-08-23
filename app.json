@@ -2,7 +2,7 @@
   "expo": {
     "name": "Sebi",
     "slug": "sebi",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "sebi",
@@ -43,6 +43,7 @@
           "defaultChannel": "default"
         }
       ],
+      "./plugins/withWidgetReceiverExported.js",
       [
         "react-native-android-widget",
         {
