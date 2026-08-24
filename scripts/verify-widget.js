@@ -301,7 +301,71 @@ console.log('\nWIDGET QUEUE ORCHESTRATOR (widget-content, stubbed AsyncStorage)'
   check('first-scheduled analytics carries same_day only',
     optInSrc.includes("track('notification_optin_first_scheduled', { same_day: plan.sameDay })"));
 
+  // ── 1.3.2: deep links — notification & widget → exact affirmation ──────
+  console.log('\nDEEP LINKS 1.3.2');
+  const { withFocusedAffirmation } = require(path.join(BUILD, 'services/dailyContent.js'));
+  const focusStore = require(path.join(BUILD, 'services/danas-focus.js'));
+
+  // L/N: deep-linked X becomes the visible card; feed continues without a
+  // duplicate of X and without resetting personalization.
+  const baseFeed = AFFIRMATIONS.slice(0, 40);
+  const focusTarget = baseFeed[25];
+  const focused = withFocusedAffirmation(baseFeed, focusTarget.id);
+  check('L: deep-linked affirmation becomes the initial visible card', focused[0].id === focusTarget.id && focused[0].text === focusTarget.text);
+  check('N: feed continues without duplicating the focused message',
+    focused.filter((a) => a.id === focusTarget.id).length === 1 &&
+    focused.length === baseFeed.length &&
+    JSON.stringify(focused.slice(1).map((a) => a.id)) === JSON.stringify(baseFeed.filter((a) => a.id !== focusTarget.id).map((a) => a.id)));
+  const outside = AFFIRMATIONS[100];
+  check('deep link outside the built feed still focuses it first', withFocusedAffirmation(baseFeed, outside.id)[0].id === outside.id);
+  check('E/K: invalid or missing id -> normal Danas feed untouched',
+    withFocusedAffirmation(baseFeed, 'does_not_exist')=== baseFeed && withFocusedAffirmation(baseFeed, null) === baseFeed);
+
+  // Consume-once focus handoff (exactly-once navigation semantics).
+  let notified = 0;
+  const unsubscribe = focusStore.subscribeDanasFocus(() => notified++);
+  focusStore.setDanasFocus('motivation_001');
+  check('focus store: subscription notified and consumed exactly once',
+    notified === 1 && focusStore.consumeDanasFocus() === 'motivation_001' && focusStore.consumeDanasFocus() === null);
+  unsubscribe();
+
+  // A/F: every scheduled notification (normal loop + opt-in first reminder)
+  // carries the exact selected affirmation id in its payload.
+  const notifPayloads = (fs.readFileSync(path.join(ROOT, 'src/services/notifications.ts'), 'utf8')
+    .match(/data: \{ affirmationId: affirmation\.id \}/g) || []).length;
+  check('A/F: both scheduling paths embed data.affirmationId', notifPayloads === 2, `${notifPayloads}`);
+
+  // C/D: tap handling covers cold start + live listener, deduplicated by
+  // notification identifier so navigation happens exactly once.
   const notifSrc = fs.readFileSync(path.join(ROOT, 'src/services/notifications.ts'), 'utf8');
+  check('C: cold start handled via getLastNotificationResponseAsync', notifSrc.includes('getLastNotificationResponseAsync'));
+  check('D: live taps handled via addNotificationResponseReceivedListener', notifSrc.includes('addNotificationResponseReceivedListener'));
+  check('C/D: responses deduplicated by request identifier', notifSrc.includes('handled.has(key)') && notifSrc.includes('handled.add(key)'));
+
+  // B: layout routes taps to Danas regardless of the current screen.
+  const layoutDeepLink = fs.readFileSync(path.join(ROOT, 'src/app/_layout.tsx'), 'utf8');
+  check('B: notification tap navigates to Danas with the tapped id',
+    layoutDeepLink.includes('observeNotificationTaps') &&
+    layoutDeepLink.includes('setDanasFocus(affirmationId)') &&
+    layoutDeepLink.includes("router.navigate('/(tabs)')"));
+
+  // Widget deep-link route + Danas consumption wiring.
+  const danasRoute = fs.readFileSync(path.join(ROOT, 'src/app/danas.tsx'), 'utf8');
+  check('sebi://danas route hands the id to the focus store and lands on Danas',
+    danasRoute.includes('affirmationId') && danasRoute.includes('setDanasFocus') && danasRoute.includes('/(tabs)'));
+  const homeSrc = fs.readFileSync(path.join(ROOT, 'src/app/(tabs)/index.tsx'), 'utf8');
+  check('M: focused card renders through the normal Danas experience',
+    homeSrc.includes('withFocusedAffirmation') && homeSrc.includes('consumeDanasFocus') &&
+    homeSrc.includes('subscribeDanasFocus') && homeSrc.includes('AffirmationExperience'));
+
+  // Native fallback ids are real corpus messages matching their texts.
+  const logicSrcDl = fs.readFileSync(path.join(NATIVE, 'java', 'SebiWidgetLogic.java'), 'utf8');
+  const idBlock = logicSrcDl.match(/FALLBACK_IDS\s*=\s*\{([\s\S]*?)\};/);
+  const fallbackIds = idBlock ? [...idBlock[1].matchAll(/"([a-z0-9_]+)"/g)].map((m) => m[1]) : [];
+  check('J: FALLBACK_IDS map verbatim to FALLBACK_TEXTS in the corpus',
+    fallbackIds.length === fallbackTexts.length &&
+    fallbackIds.every((id, i) => byId.get(id) && byId.get(id).text === fallbackTexts[i]));
+
   check('G: permission request is a no-op when already granted',
     notifSrc.includes('if (current.granted) return true;'));
   check('I: rebuild consumes the one-time marker after cancelAll (no stale leftovers)',

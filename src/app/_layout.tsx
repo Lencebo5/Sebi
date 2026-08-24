@@ -9,7 +9,7 @@ import {
   SchibstedGrotesk_600SemiBold,
   useFonts,
 } from '@expo-google-fonts/schibsted-grotesk';
-import { Stack } from 'expo-router';
+import { router, Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import React, { useEffect } from 'react';
@@ -17,8 +17,10 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { ToastProvider } from '@/components/Toast';
 import { FREE_LIMITS, PREMIUM_LIMITS } from '@/constants/appConfig';
+import { setDanasFocus } from '@/services/danas-focus';
 import {
   configureNotificationHandling,
+  observeNotificationTaps,
   rescheduleNotifications,
 } from '@/services/notifications';
 import { effectiveTopics } from '@/services/topics';
@@ -66,6 +68,17 @@ function AppShell() {
       refreshSebiWidget();
     }
   }, [ready]);
+
+  // Notification tap → Danas showing the exact tapped affirmation,
+  // regardless of which screen was open (or whether the app was killed).
+  // The focus store is consume-once, so navigation happens exactly once.
+  useEffect(() => {
+    if (!ready || !preferences.onboardingCompleted) return;
+    return observeNotificationTaps((affirmationId) => {
+      setDanasFocus(affirmationId);
+      router.navigate('/(tabs)');
+    });
+  }, [ready, preferences.onboardingCompleted]);
 
   // Keep the local notification schedule in sync with settings, goals,
   // topics and plan — refreshed on every app open so the 7-day horizon

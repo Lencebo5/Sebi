@@ -7,6 +7,7 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.net.Uri;
 import android.os.Bundle;
 import android.util.Log;
 import android.util.TypedValue;
@@ -89,7 +90,8 @@ public class SebiWidgetProvider extends AppWidgetProvider {
             views.setInt(R.id.sebi_widget_root, "setBackgroundResource", backgroundFor(spec.period));
             views.setContentDescription(R.id.sebi_widget_root, "Sebi. " + spec.text);
 
-            PendingIntent openApp = launchAppIntent(context);
+            PendingIntent openApp = openAffirmationIntent(context, spec.id, appWidgetId);
+            if (openApp == null) openApp = launchAppIntent(context);
             if (openApp != null) {
                 views.setOnClickPendingIntent(R.id.sebi_widget_root, openApp);
             }
@@ -128,7 +130,34 @@ public class SebiWidgetProvider extends AppWidgetProvider {
         return R.drawable.sebi_widget_bg_night;
     }
 
-    /** Tap anywhere opens Sebi (launcher activity → Danas tab is the start route). */
+    /**
+     * Tap opens Danas showing the EXACT affirmation currently rendered:
+     * sebi://danas?affirmationId=<id> through the app's URL scheme
+     * (app/danas.tsx). Only the stable id travels — never message text.
+     *
+     * Stale-PendingIntent safety: Android caches PendingIntents by Intent
+     * filterEquals, which INCLUDES the data URI — so when the widget
+     * rotates from message A to B the URI differs and a fresh
+     * PendingIntent is created; FLAG_UPDATE_CURRENT + FLAG_IMMUTABLE and a
+     * per-widget requestCode keep updates well-defined. A tap can never
+     * open an earlier message's id.
+     */
+    private static PendingIntent openAffirmationIntent(Context context, String affirmationId, int appWidgetId) {
+        try {
+            if (affirmationId == null || affirmationId.isEmpty()) return null;
+            Uri uri = Uri.parse("sebi://danas?affirmationId=" + Uri.encode(affirmationId));
+            Intent intent = new Intent(Intent.ACTION_VIEW, uri);
+            intent.setPackage(context.getPackageName());
+            intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            return PendingIntent.getActivity(context, appWidgetId, intent,
+                    PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE);
+        } catch (Throwable t) {
+            Log.e(TAG, "deep-link intent failed, falling back to app launch", t);
+            return null;
+        }
+    }
+
+    /** Fallback tap when no id is available: plain app launch (normal Danas). */
     private static PendingIntent launchAppIntent(Context context) {
         try {
             Intent launch = context.getPackageManager().getLaunchIntentForPackage(context.getPackageName());

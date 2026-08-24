@@ -64,6 +64,45 @@ export async function requestNotificationPermission(): Promise<boolean> {
 }
 
 /**
+ * Deliver notification taps as affirmation ids — exactly once per
+ * notification, across every launch state:
+ * - app foregrounded/backgrounded: the response listener fires;
+ * - app killed (cold start): getLastNotificationResponseAsync returns the
+ *   response that launched the app (a live listener alone would miss it).
+ * Both paths can observe the SAME response, so handling is deduplicated by
+ * the notification request identifier.
+ */
+export function observeNotificationTaps(onTap: (affirmationId: string) => void): () => void {
+  let disposed = false;
+  let subscription: { remove(): void } | null = null;
+  const handled = new Set<string>();
+
+  const process = (response: {
+    notification?: { request?: { identifier?: string; content?: { data?: Record<string, unknown> } } };
+  } | null) => {
+    const request = response?.notification?.request;
+    const key = request?.identifier;
+    if (!key || handled.has(key)) return;
+    handled.add(key);
+    const affirmationId = request?.content?.data?.affirmationId;
+    if (typeof affirmationId === 'string' && affirmationId.length > 0) onTap(affirmationId);
+  };
+
+  void (async () => {
+    const Notifications = await native();
+    if (!Notifications || disposed) return;
+    subscription = Notifications.addNotificationResponseReceivedListener(process);
+    const launchResponse = await Notifications.getLastNotificationResponseAsync();
+    if (!disposed) process(launchResponse);
+  })();
+
+  return () => {
+    disposed = true;
+    subscription?.remove();
+  };
+}
+
+/**
  * One-shot handoff from the post-first-message opt-in (see
  * NotificationOptIn): the NEXT schedule rebuild appends a single same-day
  * personalized reminder at this date. Living INSIDE the rebuild keeps the

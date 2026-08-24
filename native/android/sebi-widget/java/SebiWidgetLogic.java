@@ -42,6 +42,20 @@ public final class SebiWidgetLogic {
         "Tuđe mišljenje nije konačna presuda o meni.", // confidence_002
     };
 
+    /**
+     * Real corpus ids matching FALLBACK_TEXTS index for index (verified by
+     * verify-widget.js), so even a fallback tap deep-links to the exact
+     * affirmation the widget is showing.
+     */
+    public static final String[] FALLBACK_IDS = {
+        "motivation_008",
+        "motivation_001",
+        "confidence_001",
+        "calm_001",
+        "calm_003",
+        "confidence_002",
+    };
+
     public static final String FALLBACK_LABEL = "ZA DANAS";
 
     /** One entry of the precomputed queue. */
@@ -226,7 +240,7 @@ public final class SebiWidgetLogic {
         int index = Math.abs(dayOfYear * 4 + rank) % FALLBACK_TEXTS.length;
         String text = FALLBACK_TEXTS[index];
         String tier = tierForLength(text.length());
-        return new RenderSpec("fallback_" + index, text, FALLBACK_LABEL, period,
+        return new RenderSpec(FALLBACK_IDS[index], text, FALLBACK_LABEL, period,
                 smallSp(tier), mediumSp(tier), true, "fallback#" + index);
     }
 }

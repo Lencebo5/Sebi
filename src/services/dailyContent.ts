@@ -1,5 +1,5 @@
 import { RECENT_HISTORY_SIZE } from '@/constants/appConfig';
-import { AFFIRMATIONS, getAffirmationsByCategory } from '@/content/affirmations';
+import { AFFIRMATIONS, getAffirmation, getAffirmationsByCategory } from '@/content/affirmations';
 import type { Affirmation, CategoryId, PersonalizationProfile } from '@/models/types';
 import { orderFeed, periodForHour, pickOne } from '@/services/personalization';
 import { surfacePool } from '@/services/topics';
@@ -46,6 +46,23 @@ export function buildCategoryFeed(
     period: periodForHour(now.getHours()),
     recentIds,
   });
+}
+
+/**
+ * Deep-link focusing (notification/widget tap): put the exact tapped
+ * affirmation first while the rest of the personalized feed continues
+ * behind it — no duplicate of the focused message later in the feed, no
+ * personalization reset. An unknown/stale id leaves the feed untouched
+ * (normal Danas, never an error screen).
+ */
+export function withFocusedAffirmation(
+  feed: Affirmation[],
+  affirmationId: string | null | undefined,
+): Affirmation[] {
+  if (!affirmationId) return feed;
+  const focused = getAffirmation(affirmationId);
+  if (!focused) return feed;
+  return [focused, ...feed.filter((a) => a.id !== focused.id)];
 }
 
 /** Append an id to the recent history, keeping it bounded. */

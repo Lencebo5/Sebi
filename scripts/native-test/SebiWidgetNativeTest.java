@@ -257,6 +257,71 @@ public final class SebiWidgetNativeTest {
         check("module surfaces failed writes", "E_WRITE_FAILED".equals(failPromise.rejectCode));
         ctx.sharedPreferences.commitResult = true;
 
+        // ---- Deep link: widget tap carries the EXACT rendered affirmation ----
+        String deepLinkFor = "sebi://danas?affirmationId=";
+        mgr.widgetIds = new int[] {1};
+        mgr.options.clear();
+        ctx.sharedPreferences.values.put("queue_json", queueJson);
+        provider.onUpdate(ctx, mgr, new int[] {1});
+        Calendar dlNow = Calendar.getInstance();
+        String dlToday = String.format(Locale.US, "%04d-%02d-%02d",
+                dlNow.get(Calendar.YEAR), dlNow.get(Calendar.MONTH) + 1, dlNow.get(Calendar.DAY_OF_MONTH));
+        SebiWidgetLogic.RenderSpec current = SebiWidgetLogic.choose(
+                queueJson, dlToday, dlNow.get(Calendar.HOUR_OF_DAY), dlNow.get(Calendar.DAY_OF_YEAR));
+        String dataA = String.valueOf(
+                mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).intent.data);
+        check("G: PendingIntent deep link carries the current slot id",
+                dataA.equals(deepLinkFor + current.id), dataA + " wanted " + current.id);
+
+        // H: rotation X -> Y updates the deep link, never a stale earlier id.
+        String slotY = "[{\"id\":\"rotation_target\",\"text\":\"Nova poruka za rotaciju.\","
+                + "\"label\":\"ZA DANAS\",\"period\":\"" + SebiWidgetLogic.periodForHour(dlNow.get(Calendar.HOUR_OF_DAY))
+                + "\",\"date\":\"" + dlToday + "\",\"tier\":\"short\"}]";
+        ctx.sharedPreferences.values.put("queue_json", slotY);
+        provider.onUpdate(ctx, mgr, new int[] {1});
+        String dataB = String.valueOf(
+                mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).intent.data);
+        check("H: rotated widget deep-links to the NEW id, not the stale one",
+                dataB.equals(deepLinkFor + "rotation_target") && !dataB.equals(dataA), dataB);
+
+        // I: small and medium layouts carry the same current id.
+        Bundle smallDl = new Bundle();
+        smallDl.putInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 150);
+        mgr.options.put(1, smallDl);
+        provider.onUpdate(ctx, mgr, new int[] {1});
+        String dataSmall = String.valueOf(
+                mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).intent.data);
+        check("I: small and medium widgets deep-link the same current id",
+                dataSmall.equals(dataB)
+                        && mgr.lastViews.get(1).layoutId == R.layout.sebi_widget_small);
+        mgr.options.clear();
+
+        // J: bundled fallback carries its REAL corpus id.
+        ctx.sharedPreferences.values.remove("queue_json");
+        provider.onUpdate(ctx, mgr, new int[] {1});
+        String dataFallback = String.valueOf(
+                mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).intent.data);
+        boolean fallbackIdReal = false;
+        for (String id : SebiWidgetLogic.FALLBACK_IDS) {
+            if (dataFallback.equals(deepLinkFor + id)) fallbackIdReal = true;
+        }
+        check("J: fallback tap deep-links to a real corpus id", fallbackIdReal, dataFallback);
+        check("fallback ids never use synthetic fallback_ prefixes",
+                !String.join(",", SebiWidgetLogic.FALLBACK_IDS).contains("fallback_"));
+        check("fallback ids and texts stay aligned",
+                SebiWidgetLogic.FALLBACK_IDS.length == SebiWidgetLogic.FALLBACK_TEXTS.length);
+
+        // Deep-link intent shape: explicit package, VIEW action, safe flags.
+        android.content.Intent tapIntent =
+                mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).intent;
+        check("deep-link intent targets our package with ACTION_VIEW",
+                "com.sebi.app".equals(tapIntent.packageName)
+                        && android.content.Intent.ACTION_VIEW.equals(tapIntent.action));
+        check("deep-link PendingIntent uses UPDATE_CURRENT | IMMUTABLE",
+                (mgr.lastViews.get(1).clickIntents.get(R.id.sebi_widget_root).flags
+                        & (android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE))
+                        == (android.app.PendingIntent.FLAG_UPDATE_CURRENT | android.app.PendingIntent.FLAG_IMMUTABLE));
+
         System.out.println(failures == 0 ? "NATIVE_TESTS_PASSED" : "NATIVE_TESTS_FAILED " + failures);
         System.exit(failures == 0 ? 0 : 1);
     }
